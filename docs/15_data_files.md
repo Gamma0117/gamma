@@ -10,6 +10,7 @@ game/
     blocks/ items/ materials/ recipes/ tech/ enchants/ spells/
     buildings/ jobs/ traits/ laws/ monsters/ bosses/ loot/
     factions/ events/ biomes/ structures/ vehicles/ parts/
+    worldgen/                ← 월드 생성 설정 (P0-4: flat.json)
   assets/aurora/
     textures/{block,item,entity,particle,ui}/
     models/ animations/ sounds/ shaders/ lang/
@@ -43,6 +44,30 @@ game/
 - **텍스처**: 면마다 `north`/`south`/`east`/`west` → `side` → `all`, 위·아래는 `top`/`bottom` → `all` 순서로 찾고, 여섯 면이 모두 정해져야 한다. `emissive`는 선택. 값은 `[네임스페이스:]경로`이고, 네임스페이스를 빼면 **블록 파일이 들어 있는 `data/<ns>` 폴더의 ns**를 쓴다(블록 ID의 ns가 아님). 파일은 `assets/<ns>/textures/<경로>.png`를 나중에 읽는 묶음부터 찾으며, 없으면 오류.
 - **나중 단계에서 읽는 필드**: `tool`, `min_tool_rank`, `drops`(P1), `generation`(P0-8)은 지금은 의미를 검사하지 않고 받아 둔다. JSON 문법이 틀리면 지금도 오류다. 그 밖의 모르는 필드는 경고(오타 확인용).
 - **상태 ID**: 속성 값 조합마다 16비트 번호를 붙인다. 공기 0, unknown 1이 먼저이고, 나머지는 덮어쓰기까지 끝난 최종 블록을 ID 순으로 정렬해 번호를 매긴다. 전체 65,536개(데이터 블록 65,534개)를 넘으면 오류. 이 번호는 실행 중에만 쓰고 저장하지 않는다. 저장·전송에는 상태 문자열 `aurora:oak_log[axis=y]`(속성 이름순, 속성 없으면 `aurora:stone`)을 쓴다.
+
+## 평지 프리셋 (`worldgen/flat.json`, P0-4)
+
+평지 월드의 층 구성. 파일 하나를 통째로 쓰며, 나중에 읽는 묶음(모드)에 이 파일이 있으면 앞 묶음의 것을 대신한다. 어느 묶음에도 없으면 오류다. 나중 묶음의 자리에 파일 대신 폴더나 대상이 없는 링크가 있으면 앞 묶음으로 넘어가지 않고 오류다.
+
+```json
+{
+  "layers": [
+    { "block": "aurora:stone", "height": 124 },
+    { "block": "aurora:dirt", "height": 3 },
+    { "block": "aurora:grass_block", "height": 1 }
+  ]
+}
+```
+
+| 필드 | 필수 | 형식 |
+| --- | --- | --- |
+| `layers` | 예 | 비어 있지 않은 배열. 맨 아래(y −64)부터 위로 쌓고, 그 위는 공기 |
+| `layers[].block` | 예 | 상태 문자열. `aurora:oak_log`처럼 ID만 쓰면 그 블록의 기본 상태(`axis=y`), `aurora:oak_log[axis=x]`처럼 속성을 줄 수도 있다. 없는 블록·속성·값은 오류다(`aurora:unknown`으로 바꾸지 않는다) |
+| `layers[].height` | 예 | 1 이상의 정수. `0`, 음수, 소수(`2.0`, `1e3` 포함), 문자열, `true`는 오류 |
+
+- 높이는 더하기 전에 남은 월드 높이와 비교한다. 합이 384(월드 전체 높이)까지는 되고, 넘으면 넘친 층의 `/layers/<n>/height`에 오류를 낸다.
+- 기본 구성은 돌 y −64\~59, 흙 60\~62, 풀 63이다. 지표 위 첫 빈 칸은 64다. 기반암 블록은 아직 없어서 넣지 않았다.
+- 문법 오류·중복 키·필드 누락은 오류, 모르는 필드는 경고다. 블록 파일과 같이 오류가 하나라도 있으면 창을 만들기 전에 종료 코드 1로 끝낸다.
 
 ## 예시
 

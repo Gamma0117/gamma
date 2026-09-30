@@ -15,6 +15,7 @@ inline constexpr std::uint32_t kMaxCatchUpTicks = kTicksPerSecond * 2;
 
 // Section = 16x16x16 blocks.
 inline constexpr std::int32_t kSectionSize = 16;
+inline constexpr std::int32_t kSectionBits = 4; // log2(kSectionSize): block >> 4 is the section, block & 15 the cell.
 inline constexpr std::int32_t kSectionArea = kSectionSize * kSectionSize;
 inline constexpr std::int32_t kSectionVolume = kSectionArea * kSectionSize;
 
@@ -32,6 +33,7 @@ inline constexpr std::int32_t kBedrockY = -50;
 inline constexpr std::int32_t kBuildLimitY = 300;
 
 static_assert(1000 % kTicksPerSecond == 0, "kTickInterval must be a whole number of milliseconds");
+static_assert((1 << kSectionBits) == kSectionSize);
 static_assert(kWorldHeight % kSectionSize == 0);
 static_assert(kSectionsPerChunk == 24);
 static_assert(kWorldMinY <= kBedrockY && kBuildLimitY <= kWorldMaxY);

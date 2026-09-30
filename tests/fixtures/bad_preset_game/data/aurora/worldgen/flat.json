@@ -1,0 +1,6 @@
+{
+  "layers": [
+    { "block": "aurora:stone", "height": 1.5 },
+    { "block": "aurora:bedrock", "height": 1 }
+  ]
+}

@@ -5,6 +5,7 @@
 #include "core/timing_history.h"
 #include "core/utf8.h"
 #include "data/block_loader.h"
+#include "data/flat_preset.h"
 #include "data/game_directory.h"
 #include "platform/window.h"
 #include "render/renderer.h"
@@ -75,9 +76,14 @@ float toMilliseconds(Clock::duration duration)
     return std::chrono::duration<float, std::milli>(duration).count();
 }
 
-// Finds the game folder and loads the block data. Returns nullptr after logging every problem; the caller exits
-// before any window is created.
-std::shared_ptr<const aurora::data::BlockRegistry> loadGameData(const LaunchOptions& options)
+struct GameData {
+    std::shared_ptr<const aurora::data::BlockRegistry> blocks;
+    std::shared_ptr<const aurora::data::FlatPreset> flatPreset;
+};
+
+// Finds the game folder and loads the block data and the flat world preset. Returns nullopt after logging every
+// problem; the caller exits before any window is created.
+std::optional<GameData> loadGameData(const LaunchOptions& options)
 {
     using namespace aurora;
 
@@ -92,7 +98,7 @@ std::shared_ptr<const aurora::data::BlockRegistry> loadGameData(const LaunchOpti
     const data::GameDirectory gameDirectory = data::resolveGameDirectory(options.gameDir, candidates);
     if (gameDirectory.path.empty()) {
         core::logError("app", "{}", gameDirectory.error);
-        return nullptr;
+        return std::nullopt;
     }
     core::logInfo("app", "Game folder: {}{}", core::pathToUtf8(gameDirectory.path),
                   options.gameDir ? " (from --game-dir)" : "");
@@ -101,7 +107,17 @@ std::shared_ptr<const aurora::data::BlockRegistry> loadGameData(const LaunchOpti
     const std::vector<data::DataPack> packs{{"aurora", gameDirectory.path, true}};
     const data::BlockLoadResult blocks = data::loadBlocks(packs);
     data::logBlockLoadResult(blocks, packs.size());
-    return blocks.registry;
+    if (!blocks.registry) {
+        return std::nullopt;
+    }
+
+    // The preset names blocks, so it is read against the finished registry.
+    const data::FlatPresetLoadResult preset = data::loadFlatPreset(packs, *blocks.registry);
+    data::logFlatPresetLoadResult(preset);
+    if (!preset.preset) {
+        return std::nullopt;
+    }
+    return GameData{blocks.registry, preset.preset};
 }
 
 // Runs the game until the window closes. Every subsystem lives in this scope, so all threads are joined
@@ -111,10 +127,11 @@ int run(const LaunchOptions& options)
     using namespace aurora;
 
     // Data first: broken data ends the run before any window or GL context exists.
-    const std::shared_ptr<const data::BlockRegistry> blocks = loadGameData(options);
-    if (!blocks) {
+    const std::optional<GameData> gameData = loadGameData(options);
+    if (!gameData) {
         return 1;
     }
+    const data::BlockRegistry& blocks = *gameData->blocks;
 
     platform::Window window;
     if (!window.create(platform::WindowDesc{})) {
@@ -133,7 +150,12 @@ int run(const LaunchOptions& options)
     }
 
     core::JobSystem jobs;
-    server::IntegratedServer server;
+    // The server creates the world on its own thread and generates chunks on the job system's workers.
+    server::IntegratedServer server(server::ServerConfig{
+        .jobs = &jobs,
+        .blocks = gameData->blocks,
+        .flatPreset = gameData->flatPreset,
+    });
     if (!server.start()) {
         return 1;
     }
@@ -182,8 +204,8 @@ int run(const LaunchOptions& options)
             imgui.beginFrame();
             if (overlay.isVisible()) {
                 const ui::DebugOverlayData overlayData{
-                    frameTimes,          cpuTimes,           server.stats(),       jobs.workerCount(),
-                    jobs.pendingJobs(), blocks->blockCount(), blocks->stateCount(),
+                    frameTimes,         cpuTimes,           server.stats(),      jobs.workerCount(),
+                    jobs.pendingJobs(), blocks.blockCount(), blocks.stateCount(),
                 };
                 overlay.draw(window, renderer, overlayData);
             }

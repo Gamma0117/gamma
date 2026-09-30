@@ -1,19 +1,40 @@
 #pragma once
 
+#include "core/log.h"
 #include "core/utf8.h"
 #include "data/block_loader.h"
+#include "data/block_registry.h"
 #include "data/load_issue.h"
+#include "data/resource_id.h"
 
 #include <chrono>
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <system_error>
 #include <vector>
 
 namespace aurora::test {
+
+// Silences logging for a scope, for tests that log errors on purpose.
+class QuietLog {
+public:
+    QuietLog()
+        : m_previous(core::Log::minLevel())
+    {
+        core::Log::setMinLevel(core::LogLevel::Off);
+    }
+    ~QuietLog() { core::Log::setMinLevel(m_previous); }
+
+    QuietLog(const QuietLog&) = delete;
+    QuietLog& operator=(const QuietLog&) = delete;
+
+private:
+    core::LogLevel m_previous;
+};
 
 // A throwaway folder under the system temp directory holding data packs as sub-folders. Removed afterwards.
 class TempGame {
@@ -117,6 +138,26 @@ inline bool hasIssue(const std::vector<data::LoadIssue>& issues, data::IssueSeve
         }
     }
     return false;
+}
+
+// A registry built in memory (no files): aurora:dirt, aurora:grass_block, aurora:oak_log (axis x/y/z, default y)
+// and aurora:stone after the built-in air (0) and unknown (1). State numbers follow the sorted ids: dirt 2,
+// grass_block 3, oak_log 4-6 (axis=y is 5), stone 7.
+inline std::shared_ptr<const data::BlockRegistry> makeTestRegistry()
+{
+    const auto block = [](std::string_view id) {
+        data::BlockDefinition definition;
+        definition.id = *data::ResourceId::parse(id);
+        return definition;
+    };
+    std::vector<data::BlockDefinition> blocks{block("aurora:stone"), block("aurora:dirt"), block("aurora:grass_block")};
+    data::BlockDefinition log = block("aurora:oak_log");
+    log.properties = {data::BlockProperty{"axis", {"x", "y", "z"}}};
+    log.defaultValues = {1};
+    blocks.push_back(std::move(log));
+
+    std::vector<data::LoadIssue> issues;
+    return data::BlockRegistry::create(std::move(blocks), issues);
 }
 
 } // namespace aurora::test

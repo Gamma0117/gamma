@@ -46,7 +46,9 @@ aurora_set_warnings(aurora_platform)
 add_library(aurora_data STATIC
     src/data/block_loader.cpp
     src/data/block_registry.cpp
+    src/data/flat_preset.cpp
     src/data/game_directory.cpp
+    src/data/json_support.cpp
     src/data/load_issue.cpp
     src/data/path_probe.cpp
     src/data/resource_id.cpp
@@ -58,12 +60,23 @@ target_link_libraries(aurora_data
 )
 aurora_set_warnings(aurora_data)
 
+# world: chunks, sections, the chunk table and world generation. Plain data plus jobs; no rendering.
+add_library(aurora_world STATIC
+    src/world/chunk.cpp
+    src/world/chunk_section.cpp
+    src/world/flat_generator.cpp
+    src/world/world.cpp
+)
+add_library(aurora::world ALIAS aurora_world)
+target_link_libraries(aurora_world PUBLIC aurora::data)
+aurora_set_warnings(aurora_world)
+
 # server: authoritative simulation on its own fixed-rate thread. Knows nothing about render or ui.
 add_library(aurora_server STATIC
     src/server/integrated_server.cpp
 )
 add_library(aurora::server ALIAS aurora_server)
-target_link_libraries(aurora_server PUBLIC aurora::core)
+target_link_libraries(aurora_server PUBLIC aurora::world)
 aurora_set_warnings(aurora_server)
 
 # render: OpenGL state and draw commands.

@@ -58,16 +58,19 @@
    - **F3**을 누르면 왼쪽 위에 반투명 디버그 화면이 뜬다.
      - FPS와 프레임 시간(평균, 최근 240프레임의 최소·최대), CPU 시간, 프레임 시간 그래프. 모니터가 60Hz면 약 60 FPS / 16.7 ms, 120Hz면 약 120 FPS / 8.3 ms
      - `Server 20.0 TPS`와 틱 시간·틱 번호·건너뛴 틱(`skipped 0`). 서버는 렌더와 별도 스레드에서 초당 20틱으로 돈다
+     - `Chunks 289 loaded, 0 pending, 0 failed`: 서버가 원점 둘레(반경 8, 17×17)에 만든 평지 청크 수. 시작 직후에는 `pending`이 잠깐 보이다가 0이 된다. 화면에 그리는 것은 P0-5부터다
      - `Workers N`: 워커 스레드 수(논리 프로세서 수 − 2, 최소 1)
      - `Blocks 8 (10 states)`: 읽어 들인 블록 수(내장 공기·unknown 포함)와 블록 상태 수
      - 창 크기, VSync 체크박스(끄면 FPS가 크게 오르지만 서버는 20 TPS 그대로), OpenGL 버전(`4.5` 이상, Core Profile), GPU 이름, Tracy 상태
    - F3을 다시 누르면 사라진다. 누르고 있어도 한 번만 바뀐다.
    - 창 가장자리를 끌어 크기를 바꿔도 배경이 늘어나거나 깨지지 않고, 디버그 화면의 창 크기가 바뀐다.
+   - 콘솔에 `Flat world preset: 3 layers, 128 blocks high (top layer ends at y 63)`와, 잠시 뒤 `Spawn area ready after … ms: 289 chunks loaded, 0 failed`가 찍힌다.
    - **Esc**나 창의 X 버튼으로 닫힌다. 콘솔에 `[INFO ] [app] (Main) N frames, avg … ms/frame`과 `Server thread stopped: … last measured 20.0x TPS` 같은 로그가 찍히고, 마지막 줄은 `Exiting with code 0`이다.
 
-### 게임 데이터 (블록 JSON)
+### 게임 데이터 (블록 JSON, 평지 프리셋)
 
 - 블록 정의는 `game/data/aurora/blocks/*.json`에 있다. 형식은 `docs/15_data_files.md`의 "블록 파일".
+- 평지 월드의 층 구성은 `game/data/aurora/worldgen/flat.json`에 있다(돌 124층, 흙 3층, 풀 1층). 형식은 같은 문서의 "평지 프리셋".
 - 게임은 시작할 때 `./game`(실행 폴더), 없으면 저장소의 `game` 폴더를 읽는다. 다른 폴더를 쓰려면 `--game-dir <폴더>`를 준다(VS에서는 `launch.vs.json`의 `args`). 이때는 그 폴더만 쓴다.
 - 파일이 틀리면 로그에 **파일 경로, 필드, 이유**가 줄마다 나오고, 창을 띄우지 않고 종료 코드 1로 끝난다. 예:
   ```
@@ -108,6 +111,8 @@
 
 - `Could not find toolchain file: /scripts/buildsystems/vcpkg.cmake` → `VCPKG_ROOT`가 비어 있다. `setx VCPKG_ROOT C:\dev\vcpkg`를 하고 VS를 다시 연다.
 - 창이 뜨지 않고 로그에 `[ERROR] [data]` 줄과 `Block data has N error(s)`가 있다 → 블록 JSON이 틀렸다. 각 줄의 파일과 필드를 고친다. `--game-dir … is not an existing folder`면 지정한 폴더가 없다.
+- 창이 뜨지 않고 로그에 `The flat world preset has N error(s)`가 있다 → `worldgen/flat.json`이 틀렸다. 바로 위 ERROR 줄의 필드(`/layers/0/height` 등)를 고친다.
+- F3에 `failed`가 0이 아니거나 `Server stopped: …`가 보인다 → 청크 생성이나 서버 틱에서 오류가 났다. 로그의 `[ERROR] [world]` 또는 `Server thread stopped by an error` 줄에 좌표와 이유가 있다.
 - 창이 뜨지 않고 로그 끝에 `Fatal start-up error: …`와 `Exiting with code 1`이 있다 → 시작 단계의 치명적 오류(예: 스레드를 만들 수 없음)다. 바로 위 ERROR 줄이 원인이다.
 - CMake 출력에 `Tracy client was built without TRACY_ENABLE` 경고가 나오거나 F3 화면에 `Tracy off`가 보인다 → Tracy가 프로파일링이 꺼진 채로 빌드됐다. **프로젝트 → CMake 캐시 삭제** 후 다시 구성해 vcpkg가 `cmake/triplets` 설정으로 Tracy를 다시 빌드하게 한다.
 - 구성이 꼬였다 → 메뉴 **프로젝트 → CMake 캐시 삭제**를 누른 뒤, 다시 **프로젝트 → CMake 캐시 구성**을 누른다. 또는 저장소의 `build` 폴더를 지운다.

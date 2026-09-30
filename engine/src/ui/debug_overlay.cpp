@@ -48,13 +48,23 @@ void drawServerSection(const DebugOverlayData& data)
 {
     const server::ServerStats& server = data.server;
     if (!server.running) {
-        ImGui::TextUnformatted("Server stopped");
+        if (server.error.empty()) {
+            ImGui::TextUnformatted("Server stopped");
+        } else {
+            ImGui::Text("Server stopped: %s", server.error.c_str());
+        }
         return;
     }
     ImGui::Text("Server %.1f TPS   tick %.3f ms (max %.3f)", server.ticksPerSecond,
                 static_cast<double>(server.tickTime.averageMs), static_cast<double>(server.tickTime.maxMs));
     ImGui::Text("  tick #%llu, skipped %llu", static_cast<unsigned long long>(server.tickCount),
                 static_cast<unsigned long long>(server.skippedTicks));
+    if (server.hasWorld) {
+        ImGui::Text("Chunks %zu loaded, %zu pending, %zu failed", server.loadedChunks, server.pendingChunks,
+                    server.failedChunks);
+    } else {
+        ImGui::TextUnformatted("No world");
+    }
 }
 
 void drawSystemSection(platform::Window& window, const render::Renderer& renderer)

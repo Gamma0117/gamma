@@ -1,0 +1,7 @@
+{
+  "layers": [
+    { "block": "aurora:stone", "height": 124 },
+    { "block": "aurora:dirt", "height": 3 },
+    { "block": "aurora:grass_block", "height": 1 }
+  ]
+}

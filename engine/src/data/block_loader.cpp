@@ -3,9 +3,8 @@
 #include "core/log.h"
 #include "core/profiler.h"
 #include "core/utf8.h"
+#include "data/json_support.h"
 #include "data/path_probe.h"
-
-#include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <array>
@@ -27,7 +26,7 @@ namespace aurora::data {
 
 namespace {
 
-using Json = nlohmann::json;
+using namespace json;
 namespace fs = std::filesystem;
 
 // Fields a block file may have in this stage.
@@ -41,185 +40,6 @@ constexpr std::array<std::string_view, 4> kDeferredFields{"drops", "generation",
 constexpr std::array<std::string_view, 9> kTextureKeys{
     "all", "bottom", "east", "emissive", "north", "side", "south", "top", "west",
 };
-constexpr std::size_t kMaxQuotedLength = 40;
-
-template <std::size_t N>
-bool contains(const std::array<std::string_view, N>& list, std::string_view value)
-{
-    return std::ranges::find(list, value) != list.end();
-}
-
-// RFC 6901 token escaping, so reported pointers stay unambiguous.
-std::string pointerToken(std::string_view token)
-{
-    std::string escaped;
-    for (const char c : token) {
-        if (c == '~') {
-            escaped += "~0";
-        } else if (c == '/') {
-            escaped += "~1";
-        } else {
-            escaped += c;
-        }
-    }
-    return escaped;
-}
-
-std::string childPointer(std::string_view parent, std::string_view key)
-{
-    return std::format("{}/{}", parent, pointerToken(key));
-}
-
-// "string \"abc\"", "number 7.5", "array", ... for messages.
-std::string describe(const Json& value)
-{
-    if (value.is_object() || value.is_array()) {
-        return value.type_name();
-    }
-    std::string text = value.dump(-1, ' ', false, Json::error_handler_t::replace);
-    if (text.size() > kMaxQuotedLength) {
-        text = text.substr(0, kMaxQuotedLength) + "...";
-    }
-    return std::format("{} {}", value.type_name(), text);
-}
-
-const Json* findField(const Json& object, std::string_view key)
-{
-    const auto it = object.find(key);
-    return it == object.end() ? nullptr : &*it;
-}
-
-// Issues of one file.
-class FileIssues {
-public:
-    FileIssues(std::vector<LoadIssue>& issues, fs::path file)
-        : m_issues(issues)
-        , m_file(std::move(file))
-    {
-    }
-
-    void error(std::string pointer, std::string message)
-    {
-        m_issues.push_back({IssueSeverity::Error, m_file, std::move(pointer), std::move(message)});
-        m_hasErrors = true;
-    }
-    void warning(std::string pointer, std::string message)
-    {
-        m_issues.push_back({IssueSeverity::Warning, m_file, std::move(pointer), std::move(message)});
-    }
-    void info(std::string pointer, std::string message)
-    {
-        m_issues.push_back({IssueSeverity::Info, m_file, std::move(pointer), std::move(message)});
-    }
-
-    bool hasErrors() const { return m_hasErrors; }
-    const fs::path& file() const { return m_file; }
-
-private:
-    std::vector<LoadIssue>& m_issues;
-    fs::path m_file;
-    bool m_hasErrors = false;
-};
-
-// Parser callback that reports a key repeated within one object, at any depth. nlohmann would silently keep
-// only the last value.
-class DuplicateKeyCheck {
-public:
-    explicit DuplicateKeyCheck(FileIssues& issues)
-        : m_issues(&issues)
-    {
-    }
-
-    bool operator()(int /*depth*/, Json::parse_event_t event, Json& parsed)
-    {
-        switch (event) {
-        case Json::parse_event_t::object_start:
-        case Json::parse_event_t::array_start:
-            m_frames.emplace_back();
-            m_frames.back().isArray = event == Json::parse_event_t::array_start;
-            break;
-        case Json::parse_event_t::key:
-            if (!m_frames.empty() && parsed.is_string()) {
-                Frame& frame = m_frames.back();
-                frame.key = parsed.get<std::string>();
-                if (!frame.keys.insert(frame.key).second) {
-                    m_issues->error(currentPointer(), std::format("duplicate key '{}'", frame.key));
-                }
-            }
-            break;
-        case Json::parse_event_t::value:
-            elementDone();
-            break;
-        case Json::parse_event_t::object_end:
-        case Json::parse_event_t::array_end:
-            if (!m_frames.empty()) {
-                m_frames.pop_back();
-            }
-            elementDone();
-            break;
-        }
-        return true;
-    }
-
-private:
-    struct Frame {
-        bool isArray = false;
-        std::size_t index = 0;
-        std::string key;
-        std::set<std::string> keys;
-    };
-
-    void elementDone()
-    {
-        if (!m_frames.empty() && m_frames.back().isArray) {
-            ++m_frames.back().index;
-        }
-    }
-
-    std::string currentPointer() const
-    {
-        std::string pointer;
-        for (const Frame& frame : m_frames) {
-            pointer += '/';
-            pointer += frame.isArray ? std::to_string(frame.index) : pointerToken(frame.key);
-        }
-        return pointer;
-    }
-
-    FileIssues* m_issues;
-    std::vector<Frame> m_frames;
-};
-
-std::optional<std::string> readFile(const fs::path& file, FileIssues& issues)
-{
-    std::ifstream stream(file, std::ios::binary);
-    if (!stream) {
-        issues.error({}, "cannot open the file");
-        return std::nullopt;
-    }
-    std::string text{std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
-    if (stream.bad()) {
-        issues.error({}, "cannot read the file");
-        return std::nullopt;
-    }
-    return text;
-}
-
-std::optional<Json> parseJson(const std::string& text, FileIssues& issues)
-{
-    // Library exceptions stop at this boundary and become issues of this file.
-    try {
-        return Json::parse(text, DuplicateKeyCheck(issues));
-    } catch (const Json::exception& e) {
-        std::string_view message = e.what();
-        if (const std::size_t tagEnd = message.find("] "); message.starts_with("[json.") && tagEnd != message.npos) {
-            message.remove_prefix(tagEnd + 2);
-        }
-        issues.error({}, std::string(message));
-        return std::nullopt;
-    }
-}
-
 // A finite number >= 0 that fits in a float.
 std::optional<float> readNonNegative(const Json& value, const std::string& pointer, FileIssues& issues)
 {
@@ -233,15 +53,6 @@ std::optional<float> readNonNegative(const Json& value, const std::string& point
         return std::nullopt;
     }
     return static_cast<float>(number);
-}
-
-std::optional<bool> readBool(const Json& value, const std::string& pointer, FileIssues& issues)
-{
-    if (!value.is_boolean()) {
-        issues.error(pointer, std::format("expected true or false, got {}", describe(value)));
-        return std::nullopt;
-    }
-    return value.get<bool>();
 }
 
 void readId(const Json& root, BlockDefinition& block, FileIssues& issues)

@@ -18,12 +18,18 @@ add_executable(aurora_tests
     core/timing_history_tests.cpp
     data/block_loader_tests.cpp
     data/block_registry_tests.cpp
+    data/flat_preset_tests.cpp
     data/game_directory_tests.cpp
     data/path_probe_tests.cpp
     data/resource_id_tests.cpp
     server/integrated_server_tests.cpp
+    world/chunk_section_tests.cpp
+    world/chunk_tests.cpp
+    world/coordinates_tests.cpp
+    world/flat_generator_tests.cpp
+    world/world_tests.cpp
 )
-target_link_libraries(aurora_tests PRIVATE aurora::core aurora::data aurora::server Catch2::Catch2WithMain)
+target_link_libraries(aurora_tests PRIVATE aurora::core aurora::data aurora::world aurora::server Catch2::Catch2WithMain)
 # The shipped game data is loaded by a test. UTF-8 literal for non-ASCII checkout paths on Windows.
 target_compile_definitions(aurora_tests PRIVATE "AURORA_SOURCE_DIR=u8\"${PROJECT_SOURCE_DIR}\"")
 aurora_set_warnings(aurora_tests)
@@ -43,7 +49,15 @@ add_test(NAME app_data_errors
             "-DEXPECT2=syntax_error.json: parse error at line 5"
             "-DEXPECT3=Block data has 3 error\\(s\\)"
             "-DFORBID=GLFW|Window|OpenGL" -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/run_app.cmake")
-set_tests_properties(app_game_dir_missing app_data_errors PROPERTIES LABELS app TIMEOUT 60)
+# Valid blocks but a broken flat world preset: the same early exit.
+add_test(NAME app_preset_errors
+    COMMAND "${CMAKE_COMMAND}" -DAPP=$<TARGET_FILE:aurora>
+            "-DGAME_DIR=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bad_preset_game" -DEXPECT_EXIT=1 -DNO_DISPLAY=ON
+            "-DEXPECT1=flat.json /layers/0/height: expected a whole number >= 1, got number 1.5"
+            "-DEXPECT2=flat.json /layers/1/block: .*aurora:bedrock"
+            "-DEXPECT3=The flat world preset has 2 error\\(s\\)"
+            "-DFORBID=GLFW|Window|OpenGL|Server" -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/run_app.cmake")
+set_tests_properties(app_game_dir_missing app_data_errors app_preset_errors PROPERTIES LABELS app TIMEOUT 60)
 
 # Broken links (made at test time; symlinks in git are unreliable on Windows) must stop the start like any other
 # unreadable data, never be skipped as "missing".
