@@ -31,6 +31,7 @@
 - 창·렌더링 확인은 사용자가 Windows(Visual Studio 2022)에서 받아 실행해서 한다. 작업이 끝나면 "Windows에서 확인할 것"을 짧게 적어준다.
 - 필요하면 Xvfb + Mesa(llvmpipe, OpenGL 4.5)로 헤드리스 렌더 스모크 테스트를 만들어 스크린샷을 남긴다.
 - vcpkg가 없으면 `~/vcpkg`에 클론·부트스트랩하고 `VCPKG_ROOT`를 그곳으로 잡는다. 네트워크가 막혀 설치가 안 되면 멈추고 사용자에게 알린다.
+- 클라우드 컨테이너는 GitHub 아카이브 tarball(`github.com/*/archive/*`)이 403으로 막히고 `git fetch`는 된다. configure 전에 `export X_VCPKG_ASSET_SOURCES="x-script,$PWD/tools/vcpkg_github_archive.sh {url} {sha512} {dst}"`를 설정한다(git으로 같은 tarball을 만들고, vcpkg가 SHA512를 그대로 검증한다).
 - 작업은 브랜치에서 하고, 끝나면 커밋·푸시한다(사용자가 GitHub에서 확인하고 main에 합친다).
 
 ## 폴더 구조 (초안, P0 1단계에서 확정)
@@ -78,7 +79,7 @@ cmake --build --preset debug
 ctest --preset debug
 ```
 
-- Linux 준비: `apt-get install libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl1-mesa-dev libxkbcommon-dev pkg-config xvfb`
+- Linux 준비: `apt-get install libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl1-mesa-dev libxkbcommon-dev pkg-config xvfb autoconf autoconf-archive automake libtool` (autotools는 vcpkg의 `pthread-stubs` 포트 빌드에 필요)
 - `xvfb-run`이 있으면 ctest에 `app_smoke`(Xvfb에서 창을 띄워 60프레임 뒤 종료)가 함께 돈다.
 - vcpkg 트리플릿은 `cmake/triplets`의 overlay를 쓴다(glad를 core 프로파일로 생성). 의존성은 처음 쓰는 단계에서 `vcpkg.json`에 추가한다.
 - Windows에서 VS 2022로 여는 방법은 `README.md`.
