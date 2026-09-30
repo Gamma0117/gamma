@@ -1,12 +1,12 @@
 #include "ui/imgui_layer.h"
 
+#include "core/log.h"
+#include "core/profiler.h"
 #include "platform/window.h"
 
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_opengl3.h>
-
-#include <cstdio>
 
 namespace aurora::ui {
 
@@ -32,13 +32,14 @@ bool ImGuiLayer::init(platform::Window& window)
 
     ImGui::StyleColorsDark();
 
+    // install_callbacks = true: the backend chains to the callbacks Window::create installed, so both see input.
     if (!ImGui_ImplGlfw_InitForOpenGL(window.nativeHandle(), true)) {
-        std::fprintf(stderr, "[ui] ImGui GLFW backend init failed\n");
+        core::logError("ui", "ImGui GLFW backend init failed");
         ImGui::DestroyContext();
         return false;
     }
     if (!ImGui_ImplOpenGL3_Init(kGlslVersion)) {
-        std::fprintf(stderr, "[ui] ImGui OpenGL3 backend init failed\n");
+        core::logError("ui", "ImGui OpenGL3 backend init failed");
         ImGui_ImplGlfw_Shutdown();
         ImGui::DestroyContext();
         return false;
@@ -68,6 +69,7 @@ void ImGuiLayer::beginFrame()
 
 void ImGuiLayer::endFrame()
 {
+    AURORA_PROFILE_ZONE_N("ImGui render");
     ImGui::Render();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 }

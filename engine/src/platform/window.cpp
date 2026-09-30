@@ -1,10 +1,12 @@
 #include "platform/window.h"
 
+#include "core/log.h"
+
 // glad must come before GLFW so GLFW does not pull in the system GL header.
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 
-#include <cstdio>
+#include <algorithm>
 
 namespace aurora::platform {
 
@@ -13,18 +15,21 @@ namespace {
 constexpr int kGlMajor = 4;
 constexpr int kGlMinor = 5;
 
+// GLFW key code for each Key, indexed by the enum value.
+constexpr std::array<int, kKeyCount> kGlfwKeys{
+    GLFW_KEY_ESCAPE,
+    GLFW_KEY_F3,
+};
+static_assert(std::ranges::none_of(kGlfwKeys, [](int code) { return code == 0; }), "Every Key needs a GLFW key code");
+
 void onGlfwError(int code, const char* description)
 {
-    std::fprintf(stderr, "[platform] GLFW error %d: %s\n", code, description);
+    core::logError("platform", "GLFW error {}: {}", code, description);
 }
 
-int toGlfwKey(Key key)
+std::size_t keyIndex(Key key)
 {
-    switch (key) {
-    case Key::Escape:
-        return GLFW_KEY_ESCAPE;
-    }
-    return GLFW_KEY_UNKNOWN;
+    return static_cast<std::size_t>(key);
 }
 
 } // namespace
@@ -37,13 +42,13 @@ Window::~Window()
 bool Window::create(const WindowDesc& desc)
 {
     if (m_handle != nullptr) {
-        std::fprintf(stderr, "[platform] Window already created\n");
+        core::logError("platform", "Window already created");
         return false;
     }
 
     glfwSetErrorCallback(onGlfwError);
     if (glfwInit() != GLFW_TRUE) {
-        std::fprintf(stderr, "[platform] glfwInit failed\n");
+        core::logError("platform", "glfwInit failed");
         return false;
     }
 
@@ -57,25 +62,27 @@ bool Window::create(const WindowDesc& desc)
 
     m_handle = glfwCreateWindow(desc.width, desc.height, desc.title.c_str(), nullptr, nullptr);
     if (m_handle == nullptr) {
-        std::fprintf(stderr, "[platform] Failed to create window with OpenGL %d.%d core context\n", kGlMajor,
-                     kGlMinor);
+        core::logError("platform", "Failed to create window with OpenGL {}.{} core context", kGlMajor, kGlMinor);
         glfwTerminate();
         return false;
     }
 
     glfwMakeContextCurrent(m_handle);
     if (gladLoadGLLoader(reinterpret_cast<GLADloadproc>(glfwGetProcAddress)) == 0 || GLAD_GL_VERSION_4_5 == 0) {
-        std::fprintf(stderr, "[platform] Failed to load OpenGL %d.%d functions\n", kGlMajor, kGlMinor);
+        core::logError("platform", "Failed to load OpenGL {}.{} functions", kGlMajor, kGlMinor);
         destroy();
         return false;
     }
 
     glfwSetWindowUserPointer(m_handle, this);
     glfwSetFramebufferSizeCallback(m_handle, onFramebufferResize);
+    glfwSetKeyCallback(m_handle, onKey);
     glfwGetFramebufferSize(m_handle, &m_framebufferWidth, &m_framebufferHeight);
     glViewport(0, 0, m_framebufferWidth, m_framebufferHeight);
 
     setVsync(desc.vsync);
+    core::logInfo("platform", "Window {}x{} created (framebuffer {}x{})", desc.width, desc.height,
+                  m_framebufferWidth, m_framebufferHeight);
     return true;
 }
 
@@ -105,11 +112,13 @@ void Window::requestClose()
 
 void Window::pollEvents()
 {
+    m_keyPressed.fill(false);
     glfwPollEvents();
 }
 
 void Window::waitEvents()
 {
+    m_keyPressed.fill(false);
     glfwWaitEvents();
 }
 
@@ -126,7 +135,12 @@ void Window::setVsync(bool enabled)
 
 bool Window::isKeyDown(Key key) const
 {
-    return m_handle != nullptr && glfwGetKey(m_handle, toGlfwKey(key)) == GLFW_PRESS;
+    return m_handle != nullptr && glfwGetKey(m_handle, kGlfwKeys[keyIndex(key)]) == GLFW_PRESS;
+}
+
+bool Window::wasKeyPressed(Key key) const
+{
+    return m_keyPressed[keyIndex(key)];
 }
 
 void Window::onFramebufferResize(GLFWwindow* handle, int width, int height)
@@ -136,6 +150,20 @@ void Window::onFramebufferResize(GLFWwindow* handle, int width, int height)
     self->m_framebufferHeight = height;
     if (width > 0 && height > 0) {
         glViewport(0, 0, width, height);
+    }
+}
+
+void Window::onKey(GLFWwindow* handle, int key, int /*scancode*/, int action, int /*mods*/)
+{
+    // Only the initial press counts; GLFW_REPEAT (key held down) and GLFW_RELEASE are ignored.
+    if (action != GLFW_PRESS) {
+        return;
+    }
+    auto* self = static_cast<Window*>(glfwGetWindowUserPointer(handle));
+    for (std::size_t i = 0; i < kKeyCount; ++i) {
+        if (kGlfwKeys[i] == key) {
+            self->m_keyPressed[i] = true;
+        }
     }
 }
 

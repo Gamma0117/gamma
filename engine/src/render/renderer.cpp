@@ -1,8 +1,8 @@
 #include "render/renderer.h"
 
-#include <glad/glad.h>
+#include "core/log.h"
 
-#include <cstdio>
+#include <glad/glad.h>
 
 namespace aurora::render {
 
@@ -20,7 +20,8 @@ void GLAPIENTRY onGlDebugMessage(GLenum /*source*/, GLenum /*type*/, GLuint id, 
     if (severity == GL_DEBUG_SEVERITY_NOTIFICATION) {
         return;
     }
-    std::fprintf(stderr, "[render] GL debug (id %u): %s\n", id, message);
+    const core::LogLevel level = severity == GL_DEBUG_SEVERITY_HIGH ? core::LogLevel::Error : core::LogLevel::Warn;
+    core::logMessage(level, "render", "GL debug (id {}): {}", id, message);
 }
 
 } // namespace
@@ -38,7 +39,7 @@ bool Renderer::init()
         glDebugMessageCallback(onGlDebugMessage, nullptr);
     }
 
-    std::printf("[render] OpenGL %s | %s\n", m_glVersion.c_str(), m_glRenderer.c_str());
+    core::logInfo("render", "OpenGL {} | {}", m_glVersion, m_glRenderer);
     return true;
 }
 

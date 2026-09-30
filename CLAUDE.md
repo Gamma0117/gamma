@@ -80,7 +80,7 @@ ctest --preset debug
 ```
 
 - Linux 준비: `apt-get install libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl1-mesa-dev libxkbcommon-dev pkg-config xvfb autoconf autoconf-archive automake libtool` (autotools는 vcpkg의 `pthread-stubs` 포트 빌드에 필요)
-- `xvfb-run`이 있으면 ctest에 `app_smoke`(Xvfb에서 창을 띄워 60프레임 뒤 종료)가 함께 돈다.
+- `xvfb-run`이 있으면 ctest에 `app_smoke`(Xvfb에서 창과 F3 디버그 화면을 띄워 60프레임 뒤 종료)가 함께 돈다.
 - vcpkg 트리플릿은 `cmake/triplets`의 overlay를 쓴다(glad를 core 프로파일로 생성). 의존성은 처음 쓰는 단계에서 `vcpkg.json`에 추가한다.
 - Windows에서 VS 2022로 여는 방법은 `README.md`.
 

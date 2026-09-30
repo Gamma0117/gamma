@@ -16,5 +16,6 @@ tools/texgen/__pycache__/
 tools/motion_viewer/node_modules/
 tools/motion_viewer/viewer.html
 tools/motion_viewer/viewer_full.html
-# saves
+# saves and logs
 /saves/
+logs/

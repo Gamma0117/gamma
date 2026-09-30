@@ -1,5 +1,5 @@
 add_executable(aurora main.cpp)
-target_link_libraries(aurora PRIVATE aurora::ui)
+target_link_libraries(aurora PRIVATE aurora::ui aurora::server)
 aurora_set_warnings(aurora)
 
 if(MSVC)
