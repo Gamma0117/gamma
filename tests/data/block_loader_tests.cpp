@@ -386,6 +386,16 @@ TEST_CASE("Broken links are errors while working links are followed", "[data][lo
         CHECK_FALSE(result.registry);
         CHECK(hasIssue(result.issues, IssueSeverity::Error, "stone.json", "/textures/all", "broken link"));
     }
+    SECTION("a file in place of a texture folder in a later pack")
+    {
+        // …/textures/block is a regular file: the path to block/stone.png cannot be resolved, which is not the
+        // same as the texture being absent from that pack.
+        game.write("mod/assets/aurora/textures/block", "not a folder");
+        const BlockLoadResult result = load({game.pack("base", true), game.pack("mod")});
+        INFO(describeIssues(result.issues));
+        CHECK_FALSE(result.registry);
+        CHECK(hasIssue(result.issues, IssueSeverity::Error, "stone.json", "/textures/all", "block is not a folder"));
+    }
     SECTION("controls: an absent texture folder falls back and a working folder link is followed")
     {
         // The later pack has assets/aurora/textures but no block/ folder: the earlier pack's file is used.

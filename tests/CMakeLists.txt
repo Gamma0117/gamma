@@ -65,8 +65,14 @@ if(UNIX)
                 "-DBROKEN_LINK=${broken_link_root}/cwd_middle/game/data" -DEXPECT_EXIT=1 -DNO_DISPLAY=ON
                 "-DEXPECT1=cannot access .*cwd_middle/game/data/aurora: broken link .*cwd_middle/game/data"
                 "-DFORBID=Game folder:|Loaded|GLFW|Window|OpenGL" -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/run_app.cmake")
+    # A file where a folder of the candidate path should be (game/data is a file): not "missing", so no fallback.
+    add_test(NAME app_game_candidate_file_in_path
+        COMMAND "${CMAKE_COMMAND}" -DAPP=$<TARGET_FILE:aurora> "-DWORK_DIR=${broken_link_root}/cwd_file"
+                "-DMAKE_FILE=${broken_link_root}/cwd_file/game/data" -DEXPECT_EXIT=1 -DNO_DISPLAY=ON
+                "-DEXPECT1=cannot access .*cwd_file/game/data/aurora: .*cwd_file/game/data is not a folder"
+                "-DFORBID=Game folder:|Loaded|GLFW|Window|OpenGL" -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/run_app.cmake")
     set_tests_properties(app_data_broken_link app_game_candidate_broken_link app_game_candidate_middle_link
-                         PROPERTIES LABELS app TIMEOUT 60)
+                         app_game_candidate_file_in_path PROPERTIES LABELS app TIMEOUT 60)
 endif()
 
 # Headless smoke test: open the real window under Xvfb (Mesa llvmpipe), draw the F3 overlay and exit after a

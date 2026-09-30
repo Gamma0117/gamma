@@ -1,10 +1,12 @@
 # Runs the game once and checks its exit code and log output.
 #   cmake -DAPP=<exe> -DEXPECT_EXIT=<code> [-DGAME_DIR=<folder>] [-DWORK_DIR=<folder>] [-DNO_DISPLAY=ON]
-#         [-DBROKEN_LINK=<path>] [-DEXPECT1=<regex>] [-DEXPECT2=<regex>] [-DEXPECT3=<regex>] [-DFORBID=<regex>]
+#         [-DBROKEN_LINK=<path>] [-DMAKE_FILE=<path>]
+#         [-DEXPECT1=<regex>] [-DEXPECT2=<regex>] [-DEXPECT3=<regex>] [-DFORBID=<regex>]
 #         -P run_app.cmake
 # GAME_DIR is passed as --game-dir; without it the game searches from WORK_DIR (its working directory).
 # NO_DISPLAY removes DISPLAY/WAYLAND_DISPLAY, so reaching window creation would fail with a GLFW error.
 # BROKEN_LINK is created fresh as a symbolic link to a missing target before the run (its parents are created).
+# MAKE_FILE is created as a small regular file before the run (its parents are created), e.g. in place of a folder.
 
 set(env_args)
 if(NO_DISPLAY)
@@ -26,6 +28,11 @@ if(DEFINED BROKEN_LINK)
     if(NOT link_result EQUAL 0)
         message(FATAL_ERROR "Cannot create the broken link ${BROKEN_LINK}: ${link_result}")
     endif()
+endif()
+
+if(DEFINED MAKE_FILE)
+    file(REMOVE_RECURSE "${MAKE_FILE}")
+    file(WRITE "${MAKE_FILE}" "a file, not a folder\n")
 endif()
 
 execute_process(

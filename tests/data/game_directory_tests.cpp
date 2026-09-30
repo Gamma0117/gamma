@@ -75,6 +75,22 @@ TEST_CASE("A broken link in the game folder path is an error and not a reason to
     }
 }
 
+TEST_CASE("A file in the game folder path is an error and not a reason to look elsewhere", "[data][game_dir]")
+{
+    TempGame game("game_dir_file_in_path");
+    game.write("good/data/aurora/blocks/stone.json", "{}");
+    game.write("odd/data", "a file where the data folder should be");
+
+    const auto result = resolveGameDirectory(std::nullopt, {game.root() / "odd", game.root() / "good"});
+    CHECK(result.path.empty());
+    CHECK(result.error.find("data is not a folder") != std::string::npos);
+
+    // Control: a candidate that simply has no data folder is skipped.
+    game.write("plain/readme.txt", "no data folder");
+    CHECK(resolveGameDirectory(std::nullopt, {game.root() / "plain", game.root() / "good"}).path ==
+          game.root() / "good");
+}
+
 TEST_CASE("A game folder reached through working links is used", "[data][game_dir]")
 {
     TempGame game("game_dir_working_link");

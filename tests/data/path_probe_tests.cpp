@@ -46,6 +46,29 @@ TEST_CASE("A broken link anywhere in a path is a failure and not a missing path"
     CHECK(probePath(game.root() / "base" / "looped" / "file.txt").kind == PathKind::Failed);
 }
 
+TEST_CASE("A file in the middle of a path is a failure and not a missing path", "[data][path]")
+{
+    TempGame game("probe_file_in_path");
+    game.write("folder/file.txt", "text");
+
+    // POSIX reports ENOTDIR with "not found" here; the walk must not read that as an absent path.
+    const auto throughFile = probePath(game.root() / "folder" / "file.txt" / "child");
+    CHECK(throughFile.kind == PathKind::Failed);
+    CHECK(throughFile.failure.find("file.txt is not a folder") != std::string::npos);
+    CHECK(probePath(game.root() / "folder" / "file.txt" / "child" / "deeper.png").kind == PathKind::Failed);
+    CHECK(probePath(game.root() / "folder" / "file.txt").kind == PathKind::File); // The file itself is fine.
+
+    std::error_code error;
+    std::filesystem::create_symlink(game.root() / "folder" / "file.txt", game.root() / "link_to_file", error);
+    if (error) {
+        SKIP("symbolic links are not available here");
+    }
+    CHECK(probePath(game.root() / "link_to_file").kind == PathKind::File);
+    const auto throughLink = probePath(game.root() / "link_to_file" / "child");
+    CHECK(throughLink.kind == PathKind::Failed);
+    CHECK(throughLink.failure.find("link_to_file is not a folder") != std::string::npos);
+}
+
 TEST_CASE("Working links are followed", "[data][path]")
 {
     TempGame game("probe_working_links");
