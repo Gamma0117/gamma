@@ -314,6 +314,79 @@ TEST_CASE("Unreadable folders or files are errors and are never skipped", "[data
     }
 }
 
+TEST_CASE("Broken links are errors while working links are followed", "[data][loader]")
+{
+    TempGame game("broken_links");
+    game.texture("base", "aurora", "block/stone");
+    game.block("base", "aurora", "stone.json", kStone);
+    const std::filesystem::path data = game.root() / "base" / "data";
+
+    SECTION("a blocks folder link whose target moved away")
+    {
+        game.texture("base", "fancy", "block/gem");
+        game.write("base/real_fancy_blocks/gem.json",
+                   R"({"id": "fancy:gem", "hardness": 1, "textures": {"all": "block/gem"}})");
+        std::error_code error;
+        std::filesystem::create_directories(data / "fancy", error);
+        std::filesystem::create_directory_symlink(game.root() / "base/real_fancy_blocks", data / "fancy/blocks", error);
+        if (error) {
+            SKIP("symbolic links are not available here");
+        }
+
+        const BlockLoadResult linked = load({game.pack("base", true)});
+        INFO(describeIssues(linked.issues));
+        REQUIRE(linked.registry);
+        CHECK(linked.registry->blockCount() == 4); // A working link is followed.
+
+        std::filesystem::rename(game.root() / "base/real_fancy_blocks", game.root() / "base/moved_away");
+        const BlockLoadResult broken = load({game.pack("base", true)});
+        INFO(describeIssues(broken.issues));
+        CHECK_FALSE(broken.registry);
+        CHECK(hasIssue(broken.issues, IssueSeverity::Error, "blocks", "", "broken link"));
+    }
+    SECTION("a namespace folder that is a broken link")
+    {
+        if (!aurora::test::makeBrokenLink(data / "gone")) {
+            SKIP("symbolic links are not available here");
+        }
+        const BlockLoadResult result = load({game.pack("base", true)});
+        INFO(describeIssues(result.issues));
+        CHECK_FALSE(result.registry);
+        CHECK(hasIssue(result.issues, IssueSeverity::Error, "gone", "", "broken link"));
+    }
+    SECTION("a block file that is a broken link")
+    {
+        if (!aurora::test::makeBrokenLink(data / "aurora" / "blocks" / "gone.json")) {
+            SKIP("symbolic links are not available here");
+        }
+        const BlockLoadResult result = load({game.pack("base", true)});
+        INFO(describeIssues(result.issues));
+        CHECK_FALSE(result.registry);
+        CHECK(hasIssue(result.issues, IssueSeverity::Error, "gone.json", "", "broken link"));
+    }
+    SECTION("a texture that is a broken link in a later pack")
+    {
+        // The earlier pack's working file must not hide the later pack's broken one.
+        if (!aurora::test::makeBrokenLink(game.root() / "mod/assets/aurora/textures/block/stone.png")) {
+            SKIP("symbolic links are not available here");
+        }
+        const BlockLoadResult result = load({game.pack("base", true), game.pack("mod")});
+        INFO(describeIssues(result.issues));
+        CHECK_FALSE(result.registry);
+        CHECK(hasIssue(result.issues, IssueSeverity::Error, "stone.json", "/textures/all", "broken link"));
+    }
+    SECTION("a data pack folder that is a broken link")
+    {
+        if (!aurora::test::makeBrokenLink(game.root() / "mod")) {
+            SKIP("symbolic links are not available here");
+        }
+        const BlockLoadResult result = load({game.pack("base", true), game.pack("mod")});
+        INFO(describeIssues(result.issues));
+        CHECK_FALSE(result.registry);
+        CHECK(hasIssue(result.issues, IssueSeverity::Error, "mod", "", "broken link"));
+    }
+}
+
 #ifndef _WIN32
 TEST_CASE("A namespace folder without permissions is an error", "[data][loader]")
 {

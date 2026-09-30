@@ -48,6 +48,7 @@ add_library(aurora_data STATIC
     src/data/block_registry.cpp
     src/data/game_directory.cpp
     src/data/load_issue.cpp
+    src/data/path_probe.cpp
     src/data/resource_id.cpp
 )
 add_library(aurora::data ALIAS aurora_data)

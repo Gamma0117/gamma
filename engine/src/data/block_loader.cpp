@@ -3,6 +3,7 @@
 #include "core/log.h"
 #include "core/profiler.h"
 #include "core/utf8.h"
+#include "data/path_probe.h"
 
 #include <nlohmann/json.hpp>
 
@@ -321,7 +322,7 @@ void readLook(const Json& root, BlockDefinition& block, FileIssues& issues)
 
 struct TextureLookup {
     bool found = false;
-    std::string failure; // Set when a candidate file exists but cannot be checked (permissions, I/O).
+    std::string failure; // Set when a candidate exists but is unusable (permissions, I/O, broken link, a folder).
 };
 
 // Looks for assets/<ns>/textures/<path>.png in the packs, later packs first.
@@ -331,13 +332,17 @@ TextureLookup findTextureFile(std::span<const DataPack> packs, const ResourceId&
                               (std::string(texture.path()) + ".png");
     for (auto pack = packs.rbegin(); pack != packs.rend(); ++pack) {
         const fs::path candidate = pack->root / relative;
-        std::error_code error;
-        const fs::file_status status = fs::status(candidate, error);
-        if (status.type() == fs::file_type::regular) {
+        const PathProbe probe = probePath(candidate);
+        switch (probe.kind) {
+        case PathKind::File:
             return {true, {}};
-        }
-        if (status.type() != fs::file_type::not_found && error) {
-            return {false, std::format("cannot check {}: {}", core::pathToUtf8(candidate), error.message())};
+        case PathKind::Missing:
+            continue; // Try an earlier pack.
+        case PathKind::Failed:
+            return {false, std::format("cannot check {}: {}", core::pathToUtf8(candidate), probe.failure)};
+        case PathKind::Directory:
+        case PathKind::Other:
+            return {false, std::format("{} is not a regular file", core::pathToUtf8(candidate))};
         }
     }
     return {};
@@ -560,21 +565,22 @@ enum class FolderState {
 
 FolderState checkFolder(const fs::path& folder, std::vector<LoadIssue>& issues)
 {
-    std::error_code error;
-    const fs::file_status status = fs::status(folder, error);
-    if (status.type() == fs::file_type::not_found) {
+    const PathProbe probe = probePath(folder);
+    switch (probe.kind) {
+    case PathKind::Directory:
+        return FolderState::Present;
+    case PathKind::Missing:
         return FolderState::Missing;
-    }
-    if (error) {
+    case PathKind::Failed:
         issues.push_back(
-            {IssueSeverity::Error, folder, {}, std::format("cannot access the folder: {}", error.message())});
+            {IssueSeverity::Error, folder, {}, std::format("cannot access the folder: {}", probe.failure)});
         return FolderState::Failed;
+    case PathKind::File:
+    case PathKind::Other:
+        break;
     }
-    if (status.type() != fs::file_type::directory) {
-        issues.push_back({IssueSeverity::Error, folder, {}, "expected a folder, found something else"});
-        return FolderState::Failed;
-    }
-    return FolderState::Present;
+    issues.push_back({IssueSeverity::Error, folder, {}, "expected a folder, found a file or something else"});
+    return FolderState::Failed;
 }
 
 // Sorted entries of an existing `folder`: its sub-folders, or its regular files with `extension`. An entry whose
@@ -586,13 +592,12 @@ std::vector<fs::path> listFolder(const fs::path& folder, bool wantFolders, std::
     std::error_code error;
     fs::directory_iterator it(folder, error);
     while (!error && it != fs::directory_iterator()) {
-        std::error_code entryError;
-        const fs::file_status status = it->status(entryError);
-        if (entryError) {
+        const PathProbe probe = probePath(it->path());
+        if (probe.kind == PathKind::Failed) {
             issues.push_back({IssueSeverity::Error, it->path(), {},
-                              std::format("cannot read this entry: {}", entryError.message())});
-        } else if (wantFolders ? status.type() == fs::file_type::directory
-                               : status.type() == fs::file_type::regular && it->path().extension() == extension) {
+                              std::format("cannot read this entry: {}", probe.failure)});
+        } else if (wantFolders ? probe.kind == PathKind::Directory
+                               : probe.kind == PathKind::File && it->path().extension() == extension) {
             entries.push_back(it->path());
         }
         it.increment(error);

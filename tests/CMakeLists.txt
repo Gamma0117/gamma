@@ -44,6 +44,23 @@ add_test(NAME app_data_errors
             "-DFORBID=GLFW|Window|OpenGL" -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/run_app.cmake")
 set_tests_properties(app_game_dir_missing app_data_errors PROPERTIES LABELS app TIMEOUT 60)
 
+# Broken links (made at test time; symlinks in git are unreliable on Windows) must stop the start like any other
+# unreadable data, never be skipped as "missing".
+if(UNIX)
+    set(broken_link_root "${CMAKE_CURRENT_BINARY_DIR}/broken_link")
+    add_test(NAME app_data_broken_link
+        COMMAND "${CMAKE_COMMAND}" -DAPP=$<TARGET_FILE:aurora> "-DGAME_DIR=${broken_link_root}/game"
+                "-DBROKEN_LINK=${broken_link_root}/game/data/aurora/blocks" -DEXPECT_EXIT=1 -DNO_DISPLAY=ON
+                "-DEXPECT1=data/aurora/blocks: cannot access the folder: broken link"
+                "-DFORBID=Loaded|GLFW|Window|OpenGL" -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/run_app.cmake")
+    add_test(NAME app_game_candidate_broken_link
+        COMMAND "${CMAKE_COMMAND}" -DAPP=$<TARGET_FILE:aurora> "-DWORK_DIR=${broken_link_root}/cwd"
+                "-DBROKEN_LINK=${broken_link_root}/cwd/game/data/aurora" -DEXPECT_EXIT=1 -DNO_DISPLAY=ON
+                "-DEXPECT1=cannot access .*cwd/game/data/aurora: broken link"
+                "-DFORBID=Game folder:|Loaded|GLFW|Window|OpenGL" -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/run_app.cmake")
+    set_tests_properties(app_data_broken_link app_game_candidate_broken_link PROPERTIES LABELS app TIMEOUT 60)
+endif()
+
 # Headless smoke test: open the real window under Xvfb (Mesa llvmpipe), draw the F3 overlay and exit after a
 # few frames.
 if(UNIX AND NOT APPLE)

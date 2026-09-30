@@ -82,6 +82,16 @@ inline bool makeSelfLoop(const std::filesystem::path& link)
     return !error;
 }
 
+// Makes `link` a symbolic link to a path that does not exist. status() reports "not found" for it, just as for
+// a missing path, so it tests that broken links are told apart. False where symlinks cannot be created.
+inline bool makeBrokenLink(const std::filesystem::path& link)
+{
+    std::error_code error;
+    std::filesystem::create_directories(link.parent_path(), error);
+    std::filesystem::create_symlink("no_such_link_target", link, error);
+    return !error;
+}
+
 // Every issue on its own line, for failure messages.
 inline std::string describeIssues(const std::vector<data::LoadIssue>& issues)
 {
