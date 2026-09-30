@@ -1,0 +1,19 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "aurora",
+  "version-string": "0.0.1",
+  "builtin-baseline": "b3ae22aef2b857af6e80d756c13f15db12be4e8a",
+  "dependencies": [
+    "glfw3",
+    {
+      "name": "glad",
+      "default-features": false,
+      "features": ["gl-api-45", "loader"]
+    },
+    {
+      "name": "imgui",
+      "features": ["glfw-binding", "opengl3-binding", "docking-experimental"]
+    },
+    "catch2"
+  ]
+}

@@ -70,13 +70,18 @@ docs/                       기획서와 참고 이미지·영상
 
 ## 빌드·실행·테스트
 
-1단계에서 아래 명령이 동작하도록 만들고, 바뀌면 이 절을 고친다.
+프리셋: 공통 `debug` / `release`(Ninja, Linux·Windows), Windows 전용 `vs2022`(`.sln` 생성). 모두 `VCPKG_ROOT`가 필요하다.
 
 ```
 cmake --preset debug
 cmake --build --preset debug
 ctest --preset debug
 ```
+
+- Linux 준비: `apt-get install libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl1-mesa-dev libxkbcommon-dev pkg-config xvfb`
+- `xvfb-run`이 있으면 ctest에 `app_smoke`(Xvfb에서 창을 띄워 60프레임 뒤 종료)가 함께 돈다.
+- vcpkg 트리플릿은 `cmake/triplets`의 overlay를 쓴다(glad를 core 프로파일로 생성). 의존성은 처음 쓰는 단계에서 `vcpkg.json`에 추가한다.
+- Windows에서 VS 2022로 여는 방법은 `README.md`.
 
 ## 작업 방식
 
