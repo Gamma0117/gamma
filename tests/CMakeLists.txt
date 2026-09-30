@@ -11,7 +11,8 @@ add_executable(aurora_tests
 )
 target_link_libraries(aurora_tests PRIVATE aurora::core aurora::server Catch2::Catch2WithMain)
 aurora_set_warnings(aurora_tests)
-catch_discover_tests(aurora_tests)
+# The timeout turns a hang (e.g. a deadlocked shutdown) into a failure instead of a stuck run.
+catch_discover_tests(aurora_tests PROPERTIES TIMEOUT 60)
 
 # Headless smoke test: open the real window under Xvfb (Mesa llvmpipe), draw the F3 overlay and exit after a
 # few frames.

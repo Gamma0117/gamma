@@ -12,6 +12,7 @@
 #include <charconv>
 #include <chrono>
 #include <cstddef>
+#include <exception>
 #include <string_view>
 
 namespace {
@@ -175,7 +176,17 @@ int main(int argc, char** argv)
     aurora::core::logInfo("app", "Aurora starting ({} build)", kBuildType);
 
     LaunchOptions options;
-    const int exitCode = parseArgs(argc, argv, options) ? run(options) : 2;
+    int exitCode = 2;
+    if (parseArgs(argc, argv, options)) {
+        // Exceptions are reserved for fatal start-up errors (e.g. a worker thread that cannot be started).
+        // run() has already unwound and joined every thread when one lands here.
+        try {
+            exitCode = run(options);
+        } catch (const std::exception& e) {
+            aurora::core::logError("app", "Fatal start-up error: {}", e.what());
+            exitCode = 1;
+        }
+    }
 
     aurora::core::logInfo("app", "Exiting with code {}", exitCode);
     // Last: every thread that logs has been joined inside run().

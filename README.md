@@ -95,6 +95,7 @@
 ### 문제가 생기면
 
 - `Could not find toolchain file: /scripts/buildsystems/vcpkg.cmake` → `VCPKG_ROOT`가 비어 있다. `setx VCPKG_ROOT C:\dev\vcpkg`를 하고 VS를 다시 연다.
+- 창이 뜨지 않고 로그 끝에 `Fatal start-up error: …`와 `Exiting with code 1`이 있다 → 시작 단계의 치명적 오류(예: 스레드를 만들 수 없음)다. 바로 위 ERROR 줄이 원인이다.
 - CMake 출력에 `Tracy client was built without TRACY_ENABLE` 경고가 나오거나 F3 화면에 `Tracy off`가 보인다 → Tracy가 프로파일링이 꺼진 채로 빌드됐다. **프로젝트 → CMake 캐시 삭제** 후 다시 구성해 vcpkg가 `cmake/triplets` 설정으로 Tracy를 다시 빌드하게 한다.
 - 구성이 꼬였다 → 메뉴 **프로젝트 → CMake 캐시 삭제**를 누른 뒤, 다시 **프로젝트 → CMake 캐시 구성**을 누른다. 또는 저장소의 `build` 폴더를 지운다.
 - 구성 중 CMake가 컴파일러 확인 단계에서 `0xC0000409`로 비정상 종료한다 → 저장소를 영문·공백 없는 경로(예: `C:\dev\aurora`)에 받아서 연다. 2026-09-30에 한글·공백이 든 경로에서 VS 2022 17.12의 내장 CMake 3.29.5-msvc4가 이렇게 종료했고, 같은 커밋을 `C:\dev\aurora`에 받자 같은 CMake로 구성·빌드·F5·테스트가 모두 성공했다. 다만 최소 프로젝트로는 한글 경로에서 재현되지 않아 근본 원인은 확정하지 못했다. 영문 경로에서도 안 되면 VS 2022를 최신으로 업데이트하거나, 개발자 PowerShell에서 새 CMake(vcpkg가 받아 둔 `%VCPKG_ROOT%\downloads\tools\cmake-*\...\bin\cmake.exe` 등)로 명령줄 빌드를 한다.

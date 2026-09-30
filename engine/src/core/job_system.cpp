@@ -40,14 +40,30 @@ std::size_t JobSystem::defaultWorkerCount()
     return workerCountFor(std::thread::hardware_concurrency());
 }
 
-JobSystem::JobSystem(std::size_t workerCount)
+JobSystem::JobSystem(std::size_t workerCount, StartHook startHook)
     : m_workerCount(std::max<std::size_t>(workerCount, 1))
 {
-    m_workers.reserve(m_workerCount);
-    for (std::size_t i = 0; i < m_workerCount; ++i) {
-        m_workers.emplace_back(&JobSystem::workerLoop, this, i);
+    // The destructor does not run for a constructor that throws, and the members the workers wait on would be
+    // destroyed under them. So on any failure here, stop and join the workers already started, then rethrow.
+    try {
+        m_workers.reserve(m_workerCount);
+        for (std::size_t i = 0; i < m_workerCount; ++i) {
+            if (startHook) {
+                startHook(i);
+            }
+            m_workers.emplace_back(&JobSystem::workerLoop, this, i);
+        }
+        if (startHook) {
+            startHook(m_workerCount);
+        }
+        logInfo("job", "Started {} worker thread(s)", m_workerCount);
+    } catch (...) {
+        const std::size_t started = m_workers.size();
+        stopWorkers();
+        logError("job", "Could not start the job system ({} of {} worker threads had started)", started,
+                 m_workerCount);
+        throw;
     }
-    logInfo("job", "Started {} worker thread(s)", m_workerCount);
 }
 
 JobSystem::~JobSystem()
@@ -82,10 +98,17 @@ void JobSystem::waitIdle()
 
 void JobSystem::shutdown()
 {
+    if (stopWorkers()) {
+        logInfo("job", "Worker threads stopped");
+    }
+}
+
+bool JobSystem::stopWorkers()
+{
     {
         std::lock_guard lock(m_mutex);
         if (m_stopping && m_workers.empty()) {
-            return;
+            return false;
         }
         m_stopping = true;
     }
@@ -97,7 +120,7 @@ void JobSystem::shutdown()
         }
     }
     m_workers.clear();
-    logInfo("job", "Worker threads stopped");
+    return true;
 }
 
 std::size_t JobSystem::pendingJobs() const

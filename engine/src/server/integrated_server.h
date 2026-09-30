@@ -19,7 +19,8 @@ public:
     IntegratedServer(const IntegratedServer&) = delete;
     IntegratedServer& operator=(const IntegratedServer&) = delete;
 
-    // Starts the server thread. Returns false if it is already running.
+    // Starts the server thread. Returns false if it is already running. Throws std::system_error if the thread
+    // cannot be created (a fatal start-up error).
     bool start();
     // Wakes the loop, lets the current tick finish and joins the thread. Safe to call more than once.
     void stop();

@@ -17,7 +17,7 @@ const TickScheduler::TimePoint kStart = TickScheduler::TimePoint{} + 1000s;
 
 } // namespace
 
-TEST_CASE("First tick is due at reset, then one per interval", "[core][tick]")
+TEST_CASE("First tick is due at reset and then once per interval", "[core][tick]")
 {
     TickScheduler scheduler(kInterval, kMaxCatchUp);
     scheduler.reset(kStart);
@@ -72,7 +72,7 @@ TEST_CASE("A backlog up to the catch-up limit is caught up", "[core][tick]")
     CHECK(scheduler.nextTickTime() == kStart + 2000ms);
 }
 
-TEST_CASE("A backlog over the catch-up limit is dropped, keeping the grid", "[core][tick]")
+TEST_CASE("A backlog over the catch-up limit is dropped and the grid kept", "[core][tick]")
 {
     TickScheduler scheduler(kInterval, kMaxCatchUp);
     scheduler.reset(kStart);

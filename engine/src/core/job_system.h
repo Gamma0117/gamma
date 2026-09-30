@@ -21,6 +21,8 @@ namespace aurora::core {
 // Jobs run in FIFO order. Priorities (nearest section first) come with meshing in P0-5.
 //
 // Contract:
+// - If a worker thread cannot be started, the constructor stops and joins the workers already running, then
+//   rethrows (std::system_error): a fatal start-up error.
 // - submit()/async() are thread-safe and may be called from jobs.
 // - Once shutdown() has started, submit() returns false and async() returns an invalid future; the job is
 //   dropped. Jobs queued before that still run to completion before shutdown() returns.
@@ -33,8 +35,13 @@ public:
     // workerCountFor(std::thread::hardware_concurrency()), i.e. logical processors, not physical cores.
     static std::size_t defaultWorkerCount();
 
+    // Test seam for start-up failures. Called on the constructing thread before worker `index` starts, and once
+    // more with index == workerCount after all have started. An exception thrown from it is handled exactly like
+    // a failed thread start.
+    using StartHook = std::function<void(std::size_t index)>;
+
     // Starts `workerCount` threads (at least one).
-    explicit JobSystem(std::size_t workerCount = defaultWorkerCount());
+    explicit JobSystem(std::size_t workerCount = defaultWorkerCount(), StartHook startHook = {});
     ~JobSystem();
 
     JobSystem(const JobSystem&) = delete;
@@ -60,6 +67,8 @@ public:
     std::size_t pendingJobs() const;
 
 private:
+    // Stops accepting jobs, lets the workers finish the queue and joins them. False if already stopped.
+    bool stopWorkers();
     void workerLoop(std::size_t index);
 
     const std::size_t m_workerCount;

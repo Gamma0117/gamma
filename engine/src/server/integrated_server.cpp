@@ -42,7 +42,13 @@ bool IntegratedServer::start()
         m_stats = ServerStats{};
         m_stats.running = true;
     }
-    m_thread = std::thread(&IntegratedServer::run, this);
+    try {
+        m_thread = std::thread(&IntegratedServer::run, this);
+    } catch (...) {
+        std::lock_guard lock(m_mutex);
+        m_stats.running = false;
+        throw;
+    }
     return true;
 }
 
