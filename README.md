@@ -24,7 +24,10 @@
    ```
    (`setx` 후에는 터미널을 새로 연다)
 4. 선택: **Python 3.11+** (텍스처 재생성), **Node.js** (동작 뷰어)
-5. GitHub 저장소를 PC에 클론하고, 그 폴더에 이 키트를 풀어 넣는다
+5. GitHub 저장소를 **영문·공백 없는 경로**에 클론한다(한글·공백이 든 경로에서 CMake가 비정상 종료한 적이 있다. 아래 "문제가 생기면" 참고)
+   ```
+   git clone https://github.com/Gamma0117/gamma.git C:\dev\aurora
+   ```
 
 ## Visual Studio 2022에서 열고 실행하기
 
@@ -63,16 +66,16 @@
 ### 테스트 실행
 
 - 메뉴 **테스트 → 테스트 탐색기**를 열고 **모두 실행**을 누른다. `aurora_tests`의 테스트가 모두 초록색이면 된다.
+  - 처음 열었을 때 테스트가 0개로 보이면 메뉴 **테스트 → aurora에 대해 CTests 실행**을 한 번 누르거나 검색이 끝나기를 기다린다. 그러면 목록에 나타난다.
+  - Linux 전용 `app_smoke`(Xvfb 창 테스트)는 Windows 목록에 없다.
 - 또는 **보기 → 터미널**(개발자 PowerShell)에서 `ctest --preset debug`를 실행한다.
 
 ### 문제가 생기면
 
 - `Could not find toolchain file: /scripts/buildsystems/vcpkg.cmake` → `VCPKG_ROOT`가 비어 있다. `setx VCPKG_ROOT C:\dev\vcpkg`를 하고 VS를 다시 연다.
 - 구성이 꼬였다 → 메뉴 **프로젝트 → CMake 캐시 삭제**를 누른 뒤, 다시 **프로젝트 → CMake 캐시 구성**을 누른다. 또는 저장소의 `build` 폴더를 지운다.
-- 구성 중 CMake가 컴파일러 확인 단계에서 `0xC0000409`로 비정상 종료한다 → VS 2022에 포함된 CMake 3.29.5-msvc4에서 실제로 있었던 일이다. 같은 `debug` 프리셋이 CMake 4.4.3으로는 성공했다(2026-09-30, 원인은 확정하지 못함). 해 볼 것:
-  1. 저장소를 영문·공백 없는 경로(예: `C:\dev\aurora`)에 다시 받아 구성해 본다. 한글·공백이 든 경로가 원인일 수 있다.
-  2. Visual Studio Installer에서 VS 2022를 최신으로 업데이트한다(포함된 CMake도 함께 바뀐다).
-  3. 그래도 안 되면 개발자 PowerShell에서 새 CMake로 명령줄 빌드를 한다. vcpkg가 받아 둔 `%VCPKG_ROOT%\downloads\tools\cmake-*\...\bin\cmake.exe`를 써도 된다.
+- 구성 중 CMake가 컴파일러 확인 단계에서 `0xC0000409`로 비정상 종료한다 → 저장소를 영문·공백 없는 경로(예: `C:\dev\aurora`)에 받아서 연다. 2026-09-30에 한글·공백이 든 경로에서 VS 2022 17.12의 내장 CMake 3.29.5-msvc4가 이렇게 종료했고, 같은 커밋을 `C:\dev\aurora`에 받자 같은 CMake로 구성·빌드·F5·테스트가 모두 성공했다. 다만 최소 프로젝트로는 한글 경로에서 재현되지 않아 근본 원인은 확정하지 못했다. 영문 경로에서도 안 되면 VS 2022를 최신으로 업데이트하거나, 개발자 PowerShell에서 새 CMake(vcpkg가 받아 둔 `%VCPKG_ROOT%\downloads\tools\cmake-*\...\bin\cmake.exe` 등)로 명령줄 빌드를 한다.
+- F5로 실행하면 출력 창에 `wil::ResultException` first-chance 예외 알림이 반복된다 → 이미 처리된 예외라 앱 동작에는 영향이 없다. 우리 코드와 GLFW·ImGui는 WIL을 쓰지 않으므로 Windows 구성 요소나 드라이버 내부에서 나는 알림으로 보인다(원인은 조사하지 않음). 창이 정상으로 뜨고 종료 코드가 0이면 무시한다.
 - `.sln`으로 작업하고 싶다 → 개발자 PowerShell에서 `cmake --preset vs2022`를 실행하고 `build\vs2022\aurora.sln`을 연다. 평소에는 필요 없다.
 
 ## Claude Code로 시작하기 (웹, GitHub 저장소 연결)
