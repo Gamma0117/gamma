@@ -19,6 +19,7 @@ add_executable(aurora_tests
     data/block_loader_tests.cpp
     data/block_registry_tests.cpp
     data/game_directory_tests.cpp
+    data/path_probe_tests.cpp
     data/resource_id_tests.cpp
     server/integrated_server_tests.cpp
 )
@@ -58,7 +59,14 @@ if(UNIX)
                 "-DBROKEN_LINK=${broken_link_root}/cwd/game/data/aurora" -DEXPECT_EXIT=1 -DNO_DISPLAY=ON
                 "-DEXPECT1=cannot access .*cwd/game/data/aurora: broken link"
                 "-DFORBID=Game folder:|Loaded|GLFW|Window|OpenGL" -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/run_app.cmake")
-    set_tests_properties(app_data_broken_link app_game_candidate_broken_link PROPERTIES LABELS app TIMEOUT 60)
+    # A broken link in the middle of the candidate path (game/data -> missing), not at its end.
+    add_test(NAME app_game_candidate_middle_link
+        COMMAND "${CMAKE_COMMAND}" -DAPP=$<TARGET_FILE:aurora> "-DWORK_DIR=${broken_link_root}/cwd_middle"
+                "-DBROKEN_LINK=${broken_link_root}/cwd_middle/game/data" -DEXPECT_EXIT=1 -DNO_DISPLAY=ON
+                "-DEXPECT1=cannot access .*cwd_middle/game/data/aurora: broken link .*cwd_middle/game/data"
+                "-DFORBID=Game folder:|Loaded|GLFW|Window|OpenGL" -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/run_app.cmake")
+    set_tests_properties(app_data_broken_link app_game_candidate_broken_link app_game_candidate_middle_link
+                         PROPERTIES LABELS app TIMEOUT 60)
 endif()
 
 # Headless smoke test: open the real window under Xvfb (Mesa llvmpipe), draw the F3 overlay and exit after a

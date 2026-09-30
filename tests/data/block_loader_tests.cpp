@@ -375,6 +375,36 @@ TEST_CASE("Broken links are errors while working links are followed", "[data][lo
         CHECK_FALSE(result.registry);
         CHECK(hasIssue(result.issues, IssueSeverity::Error, "stone.json", "/textures/all", "broken link"));
     }
+    SECTION("a texture folder that is a broken link in a later pack")
+    {
+        // The link is in the middle of the texture path (…/textures/block -> missing), not the file itself.
+        if (!aurora::test::makeBrokenLink(game.root() / "mod/assets/aurora/textures/block")) {
+            SKIP("symbolic links are not available here");
+        }
+        const BlockLoadResult result = load({game.pack("base", true), game.pack("mod")});
+        INFO(describeIssues(result.issues));
+        CHECK_FALSE(result.registry);
+        CHECK(hasIssue(result.issues, IssueSeverity::Error, "stone.json", "/textures/all", "broken link"));
+    }
+    SECTION("controls: an absent texture folder falls back and a working folder link is followed")
+    {
+        // The later pack has assets/aurora/textures but no block/ folder: the earlier pack's file is used.
+        std::filesystem::create_directories(game.root() / "mod/assets/aurora/textures");
+        const BlockLoadResult absent = load({game.pack("base", true), game.pack("mod")});
+        INFO(describeIssues(absent.issues));
+        CHECK(absent.registry);
+
+        game.texture("real", "aurora", "block/stone");
+        std::error_code error;
+        std::filesystem::create_directory_symlink(game.root() / "real/assets/aurora/textures/block",
+                                                  game.root() / "mod/assets/aurora/textures/block", error);
+        if (error) {
+            SKIP("symbolic links are not available here");
+        }
+        const BlockLoadResult linked = load({game.pack("base", true), game.pack("mod")});
+        INFO(describeIssues(linked.issues));
+        CHECK(linked.registry);
+    }
     SECTION("a data pack folder that is a broken link")
     {
         if (!aurora::test::makeBrokenLink(game.root() / "mod")) {

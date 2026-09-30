@@ -19,8 +19,9 @@ struct PathProbe {
     std::string failure; // Why, when kind is Failed.
 };
 
-// Classifies `path`, following links. A link whose target does not exist is Failed, not Missing: status() alone
-// reports it as "not found", which would let data behind a broken link be skipped silently.
+// Classifies `path`, following links. A link whose target does not exist, as the last element or anywhere in the
+// middle of the path, is Failed, not Missing: status() alone reports it as "not found", which would let data behind
+// a broken link be skipped silently. Only a genuinely absent element makes the path Missing.
 PathProbe probePath(const std::filesystem::path& path);
 
 } // namespace aurora::data

@@ -62,13 +62,32 @@ TEST_CASE("A broken link in the game folder path is an error and not a reason to
     CHECK(explicitLink.path.empty());
     CHECK(explicitLink.error.find("broken link") != std::string::npos);
 
-    // Neither a broken candidate folder nor a broken data/aurora inside it falls through to the good candidate.
-    for (const char* broken : {"linked_root", "linked_marker"}) {
+    // A broken link in the middle of the path: game/data -> missing.
+    std::filesystem::create_directories(game.root() / "linked_middle");
+    REQUIRE(aurora::test::makeBrokenLink(game.root() / "linked_middle" / "data"));
+
+    // None of these falls through to the good candidate.
+    for (const char* broken : {"linked_root", "linked_marker", "linked_middle"}) {
         CAPTURE(broken);
         const auto result = resolveGameDirectory(std::nullopt, {game.root() / broken, good});
         CHECK(result.path.empty());
         CHECK(result.error.find("broken link") != std::string::npos);
     }
+}
+
+TEST_CASE("A game folder reached through working links is used", "[data][game_dir]")
+{
+    TempGame game("game_dir_working_link");
+    game.write("real_data/aurora/blocks/stone.json", "{}");
+    game.write("good/data/aurora/blocks/stone.json", "{}");
+    std::filesystem::create_directories(game.root() / "linked");
+    std::error_code error;
+    std::filesystem::create_directory_symlink(game.root() / "real_data", game.root() / "linked" / "data", error);
+    if (error) {
+        SKIP("symbolic links are not available here");
+    }
+    CHECK(resolveGameDirectory(std::nullopt, {game.root() / "linked", game.root() / "good"}).path ==
+          game.root() / "linked");
 }
 
 TEST_CASE("Without --game-dir the first candidate with data/aurora is used", "[data][game_dir]")
