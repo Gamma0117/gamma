@@ -109,11 +109,10 @@ void ChunkSection::compact()
     std::ranges::sort(used);
 
     const std::uint32_t bits = bitsForPaletteSize(used.size());
-    if (bits == kDirectBits) {
-        used.clear();
-    }
     m_bits = bits;
-    m_palette = std::move(used);
+    // Direct storage keeps no palette. A new empty vector rather than clear(), which would keep the allocation;
+    // `used` is freed on return.
+    m_palette = bits == kDirectBits ? std::vector<BlockStateId>() : std::move(used);
     m_data = std::vector<std::uint64_t>(wordCount(bits)); // A fresh vector: shrinking frees the old words.
     if (bits == 0) {
         return;

@@ -247,6 +247,28 @@ TEST_CASE("compact rebuilds the palette from the states in use", "[world][sectio
         CHECK(matches(section, reference));
         CHECK(section.memoryBytes() <= 2048 + 64);
     }
+    SECTION("A section that stays direct keeps no palette")
+    {
+        // 257 states is the smallest count that stays direct; 4096 is every cell different.
+        for (const std::size_t stateCount : {std::size_t{257}, kCells}) {
+            INFO(stateCount << " states");
+            ChunkSection section;
+            Reference reference{};
+            for (std::size_t i = 0; i < kCells; ++i) {
+                const auto state = static_cast<BlockStateId>(i % stateCount + 1);
+                section.setAt(i, state);
+                reference[i] = state;
+            }
+            REQUIRE(section.isDirect());
+            REQUIRE(section.memoryBytes() == 8192);
+
+            section.compact();
+            CHECK(section.isDirect());
+            CHECK(section.palette().empty());
+            CHECK(section.memoryBytes() == 8192); // Only the cells: no palette storage left behind.
+            CHECK(matches(section, reference));
+        }
+    }
     SECTION("A section of one non-air state becomes 0 bits")
     {
         ChunkSection section = ChunkSection::filled(kStone);
