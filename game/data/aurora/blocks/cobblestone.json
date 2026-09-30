@@ -1,0 +1,6 @@
+{
+  "id": "aurora:cobblestone",
+  "hardness": 2.0,
+  "tool": "pickaxe",
+  "textures": { "all": "block/cobblestone" }
+}

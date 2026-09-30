@@ -2,6 +2,7 @@
 
 #include "core/profiler.h"
 #include "core/thread.h"
+#include "core/utf8.h"
 
 #include <atomic>
 #include <chrono>
@@ -69,12 +70,6 @@ std::string timestamp()
     return std::format("{:02}:{:02}:{:02}.{:03}", local.tm_hour, local.tm_min, local.tm_sec, millis);
 }
 
-std::string toUtf8(const std::filesystem::path& path)
-{
-    const std::u8string text = path.u8string();
-    return {reinterpret_cast<const char*>(text.data()), text.size()};
-}
-
 } // namespace
 
 std::string_view logLevelName(LogLevel level)
@@ -126,12 +121,12 @@ bool Log::init(const LogConfig& config)
     }
 
     if (!opened) {
-        logError("log", "Cannot open log file {}; logging to the console only", toUtf8(latestPath));
+        logError("log", "Cannot open log file {}; logging to the console only", pathToUtf8(latestPath));
         return false;
     }
     std::error_code error;
     const std::filesystem::path absolutePath = std::filesystem::absolute(latestPath, error);
-    logInfo("log", "Log file: {}", toUtf8(error ? latestPath : absolutePath));
+    logInfo("log", "Log file: {}", pathToUtf8(error ? latestPath : absolutePath));
     return true;
 }
 

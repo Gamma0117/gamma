@@ -3,6 +3,9 @@
 #include "core/profiler.h"
 #include "core/thread.h"
 #include "core/timing_history.h"
+#include "core/utf8.h"
+#include "data/block_loader.h"
+#include "data/game_directory.h"
 #include "platform/window.h"
 #include "render/renderer.h"
 #include "server/integrated_server.h"
@@ -13,7 +16,12 @@
 #include <chrono>
 #include <cstddef>
 #include <exception>
+#include <filesystem>
+#include <memory>
+#include <optional>
 #include <string_view>
+#include <system_error>
+#include <vector>
 
 namespace {
 
@@ -33,6 +41,9 @@ struct LaunchOptions {
     long long maxFrames = 0;
     // Start with the F3 overlay open.
     bool debugOverlay = false;
+    // Folder holding data/ and assets/. Without it the game looks in ./game, then in the source tree it was built
+    // from.
+    std::optional<std::filesystem::path> gameDir;
 };
 
 bool parseArgs(int argc, char** argv, LaunchOptions& options)
@@ -48,9 +59,11 @@ bool parseArgs(int argc, char** argv, LaunchOptions& options)
             }
         } else if (arg == "--debug-overlay") {
             options.debugOverlay = true;
+        } else if (arg == "--game-dir" && i + 1 < argc) {
+            options.gameDir = std::filesystem::path(argv[++i]);
         } else {
             aurora::core::logError("app", "Unknown argument: {}", arg);
-            aurora::core::logError("app", "Usage: aurora [--frames N] [--debug-overlay]");
+            aurora::core::logError("app", "Usage: aurora [--frames N] [--debug-overlay] [--game-dir <folder>]");
             return false;
         }
     }
@@ -62,11 +75,46 @@ float toMilliseconds(Clock::duration duration)
     return std::chrono::duration<float, std::milli>(duration).count();
 }
 
+// Finds the game folder and loads the block data. Returns nullptr after logging every problem; the caller exits
+// before any window is created.
+std::shared_ptr<const aurora::data::BlockRegistry> loadGameData(const LaunchOptions& options)
+{
+    using namespace aurora;
+
+    std::vector<std::filesystem::path> candidates;
+    std::error_code error;
+    const std::filesystem::path workingDirectory = std::filesystem::current_path(error);
+    if (!error) {
+        candidates.push_back(workingDirectory / "game");
+    }
+    candidates.emplace_back(AURORA_SOURCE_GAME_DIR);
+
+    const data::GameDirectory gameDirectory = data::resolveGameDirectory(options.gameDir, candidates);
+    if (gameDirectory.path.empty()) {
+        core::logError("app", "{}", gameDirectory.error);
+        return nullptr;
+    }
+    core::logInfo("app", "Game folder: {}{}", core::pathToUtf8(gameDirectory.path),
+                  options.gameDir ? " (from --game-dir)" : "");
+
+    // Mods (game/mods/<name>, loaded by name after the base game) come later.
+    const std::vector<data::DataPack> packs{{"aurora", gameDirectory.path, true}};
+    const data::BlockLoadResult blocks = data::loadBlocks(packs);
+    data::logBlockLoadResult(blocks, packs.size());
+    return blocks.registry;
+}
+
 // Runs the game until the window closes. Every subsystem lives in this scope, so all threads are joined
 // before main() closes the log.
 int run(const LaunchOptions& options)
 {
     using namespace aurora;
+
+    // Data first: broken data ends the run before any window or GL context exists.
+    const std::shared_ptr<const data::BlockRegistry> blocks = loadGameData(options);
+    if (!blocks) {
+        return 1;
+    }
 
     platform::Window window;
     if (!window.create(platform::WindowDesc{})) {
@@ -134,7 +182,8 @@ int run(const LaunchOptions& options)
             imgui.beginFrame();
             if (overlay.isVisible()) {
                 const ui::DebugOverlayData overlayData{
-                    frameTimes, cpuTimes, server.stats(), jobs.workerCount(), jobs.pendingJobs(),
+                    frameTimes,          cpuTimes,           server.stats(),       jobs.workerCount(),
+                    jobs.pendingJobs(), blocks->blockCount(), blocks->stateCount(),
                 };
                 overlay.draw(window, renderer, overlayData);
             }

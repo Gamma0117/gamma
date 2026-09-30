@@ -1,0 +1,6 @@
+{
+  "id": "aurora:stone",
+  "hardness": 1.5,
+  "tool": "pickaxe",
+  "textures": { "all": "block/stone" }
+}

@@ -1,0 +1,452 @@
+#include "data/block_loader.h"
+
+#include "data_test_support.h"
+
+#include <catch2/catch_test_macros.hpp>
+
+#include <array>
+#include <filesystem>
+#include <format>
+#include <string>
+#include <string_view>
+#include <vector>
+
+using namespace aurora::data;
+using aurora::test::describeIssues;
+using aurora::test::hasIssue;
+using aurora::test::TempGame;
+
+namespace {
+
+constexpr std::string_view kStone = R"({"id": "aurora:stone", "hardness": 1.5, "textures": {"all": "block/stone"}})";
+
+BlockLoadResult load(const std::vector<DataPack>& packs)
+{
+    return loadBlocks(packs);
+}
+
+// A base pack "base" with the stone texture and one block file.
+BlockLoadResult loadSingleFile(std::string_view json)
+{
+    TempGame game("single");
+    game.texture("base", "aurora", "block/stone");
+    game.block("base", "aurora", "test.json", json);
+    return load({game.pack("base", true)});
+}
+
+std::vector<std::string> blockIds(const BlockRegistry& registry)
+{
+    std::vector<std::string> ids;
+    for (const BlockDefinition& block : registry.blocks()) {
+        ids.push_back(block.id.str());
+    }
+    return ids;
+}
+
+// {"a": [...], "b": [...]} with `values` numbered values each, for state-limit cases.
+std::string numberedStates(const std::vector<std::size_t>& valueCounts)
+{
+    std::string states;
+    for (std::size_t p = 0; p < valueCounts.size(); ++p) {
+        std::string values;
+        for (std::size_t v = 0; v < valueCounts[p]; ++v) {
+            values += std::format("{}\"v{}\"", v == 0 ? "" : ",", v);
+        }
+        states += std::format("{}\"p{}\": [{}]", p == 0 ? "" : ", ", p, values);
+    }
+    return "{" + states + "}";
+}
+
+std::string blockWithStates(std::string_view id, const std::vector<std::size_t>& valueCounts)
+{
+    return std::format(R"({{"id": "{}", "hardness": 1, "textures": {{"all": "block/stone"}}, "states": {}}})", id,
+                       numberedStates(valueCounts));
+}
+
+} // namespace
+
+TEST_CASE("A valid pack loads with every field applied", "[data][loader]")
+{
+    TempGame game("valid");
+    for (const std::string_view texture : {"block/stone", "block/grass_top", "block/grass_side", "block/dirt",
+                                           "block/log_top", "block/log_side", "block/lamp", "block/lamp_e"}) {
+        game.texture("base", "aurora", texture);
+    }
+    game.block("base", "aurora", "stone.json", kStone);
+    game.block("base", "aurora", "grass.json", R"({
+        "id": "aurora:grass_block", "hardness": 0.6,
+        "textures": {"top": "block/grass_top", "bottom": "block/dirt", "side": "block/grass_side"}
+    })");
+    game.block("base", "aurora", "log.json", R"({
+        "id": "aurora:oak_log", "hardness": 2,
+        "textures": {"top": "block/log_top", "bottom": "block/log_top", "side": "block/log_side"},
+        "states": {"axis": ["x", "y", "z"]}, "default_state": {"axis": "y"}
+    })");
+    game.block("base", "aurora", "lamp.json", R"({
+        "id": "aurora:lamp", "unbreakable": true, "explosion_resistance": 600, "light": 15,
+        "render": "cutout", "solid": false,
+        "textures": {"all": "aurora:block/lamp", "emissive": "block/lamp_e"},
+        "tool": "pickaxe", "min_tool_rank": 3, "drops": "aurora:loot/lamp", "generation": {"y_min": 0}
+    })");
+
+    const BlockLoadResult result = load({game.pack("base", true)});
+    INFO(describeIssues(result.issues));
+    REQUIRE(result.registry);
+    CHECK(result.issues.empty()); // Deferred fields (tool, drops, ...) are accepted silently.
+    CHECK(result.filesRead == 4);
+
+    const BlockRegistry& registry = *result.registry;
+    CHECK(blockIds(registry) == std::vector<std::string>{"aurora:air", "aurora:unknown", "aurora:grass_block",
+                                                         "aurora:lamp", "aurora:oak_log", "aurora:stone"});
+    CHECK(registry.stateCount() == 8);
+
+    const BlockDefinition& grass = *registry.findBlock("aurora:grass_block");
+    CHECK(grass.hardness == 0.6f);
+    CHECK(grass.faceTextures[static_cast<std::size_t>(BlockFace::Up)].str() == "aurora:block/grass_top");
+    CHECK(grass.faceTextures[static_cast<std::size_t>(BlockFace::Down)].str() == "aurora:block/dirt");
+    CHECK(grass.faceTextures[static_cast<std::size_t>(BlockFace::North)].str() == "aurora:block/grass_side");
+    CHECK(grass.faceTextures[static_cast<std::size_t>(BlockFace::East)].str() == "aurora:block/grass_side");
+    CHECK(grass.render == RenderLayer::Opaque);
+    CHECK(grass.solid);
+    CHECK(grass.light == 0);
+    CHECK(grass.sourcePack == "base");
+    CHECK(grass.sourceFile.filename() == "grass.json");
+
+    const BlockDefinition& lamp = *registry.findBlock("aurora:lamp");
+    CHECK(lamp.unbreakable);
+    CHECK(lamp.explosionResistance == 600.0f);
+    CHECK(lamp.light == 15);
+    CHECK(lamp.render == RenderLayer::Cutout);
+    CHECK_FALSE(lamp.solid);
+    CHECK(lamp.emissiveTexture.str() == "aurora:block/lamp_e");
+
+    CHECK(registry.stateToString(registry.findBlock("aurora:oak_log")->defaultState) == "aurora:oak_log[axis=y]");
+}
+
+TEST_CASE("Each kind of bad block file is reported with its field", "[data][loader]")
+{
+    struct Case {
+        std::string_view json;
+        std::string_view pointer;
+        std::string_view text;
+    };
+    // Every case is a complete file; `pointer` and `text` must match one of its errors.
+    const std::array cases{
+        // Syntax and shape
+        Case{R"({"id": "aurora:a",})", "", "parse error at line 1"},
+        Case{R"([1, 2])", "", "must hold one JSON object"},
+        Case{R"({"id": "aurora:a", "hardness": 1e999, "textures": {"all": "block/stone"}})", "", "overflow"},
+        Case{R"({"id": "aurora:a", "hardness": 1, "hardness": 2, "textures": {"all": "block/stone"}})",
+             "/hardness", "duplicate key 'hardness'"},
+        Case{R"({"id": "aurora:a", "hardness": 1, "textures": {"all": "block/stone", "all": "block/stone"}})",
+             "/textures/all", "duplicate key 'all'"},
+        Case{R"({"id": "aurora:a", "hardness": 1, "textures": {"all": "block/stone"},
+                 "generation": {"veins": [{"size": 1}, {"size": 2, "size": 3}]}})",
+             "/generation/veins/1/size", "duplicate key 'size'"},
+        // id
+        Case{R"({"hardness": 1, "textures": {"all": "block/stone"}})", "", "missing required field 'id'"},
+        Case{R"({"id": 5, "hardness": 1, "textures": {"all": "block/stone"}})", "/id", "expected a string"},
+        Case{R"({"id": "Aurora:Stone", "hardness": 1, "textures": {"all": "block/stone"}})", "/id",
+             "not a valid id"},
+        Case{R"({"id": "stone", "hardness": 1, "textures": {"all": "block/stone"}})", "/id", "not a valid id"},
+        Case{R"({"id": "aurora:blocks/stone", "hardness": 1, "textures": {"all": "block/stone"}})", "/id",
+             "must not contain '/'"},
+        Case{R"({"id": "aurora:air", "hardness": 1, "textures": {"all": "block/stone"}})", "/id",
+             "built into the engine"},
+        // Breaking
+        Case{R"({"id": "aurora:a", "textures": {"all": "block/stone"}})", "", "missing required field 'hardness'"},
+        Case{R"({"id": "aurora:a", "hardness": "abc", "textures": {"all": "block/stone"}})", "/hardness",
+             "expected a number >= 0, got string \"abc\""},
+        Case{R"({"id": "aurora:a", "hardness": -1, "textures": {"all": "block/stone"}})", "/hardness",
+             "finite number >= 0"},
+        Case{R"({"id": "aurora:a", "hardness": 1e300, "textures": {"all": "block/stone"}})", "/hardness",
+             "finite number >= 0"},
+        Case{R"({"id": "aurora:a", "hardness": 1, "unbreakable": true, "textures": {"all": "block/stone"}})",
+             "/hardness", "remove one of the two"},
+        Case{R"({"id": "aurora:a", "unbreakable": "yes", "textures": {"all": "block/stone"}})", "/unbreakable",
+             "expected true or false"},
+        Case{R"({"id": "aurora:a", "hardness": 1, "explosion_resistance": -5, "textures": {"all": "block/stone"}})",
+             "/explosion_resistance", "finite number >= 0"},
+        // Look
+        Case{R"({"id": "aurora:a", "hardness": 1, "light": 16, "textures": {"all": "block/stone"}})", "/light",
+             "whole number 0-15"},
+        Case{R"({"id": "aurora:a", "hardness": 1, "light": 7.0, "textures": {"all": "block/stone"}})", "/light",
+             "whole number 0-15"},
+        Case{R"({"id": "aurora:a", "hardness": 1, "light": -1, "textures": {"all": "block/stone"}})", "/light",
+             "whole number 0-15"},
+        Case{R"({"id": "aurora:a", "hardness": 1, "render": "glass", "textures": {"all": "block/stone"}})",
+             "/render", "\"opaque\", \"cutout\" or \"translucent\""},
+        Case{R"({"id": "aurora:a", "hardness": 1, "solid": 1, "textures": {"all": "block/stone"}})", "/solid",
+             "expected true or false"},
+        // Textures
+        Case{R"({"id": "aurora:a", "hardness": 1})", "", "missing required field 'textures'"},
+        Case{R"({"id": "aurora:a", "hardness": 1, "textures": "block/stone"})", "/textures", "expected an object"},
+        Case{R"({"id": "aurora:a", "hardness": 1, "textures": {"all": 5}})", "/textures/all", "expected a texture"},
+        Case{R"({"id": "aurora:a", "hardness": 1, "textures": {"all": "Block/Stone"}})", "/textures/all",
+             "expected a texture"},
+        Case{R"({"id": "aurora:a", "hardness": 1, "textures": {"all": "block/nope"}})", "/textures/all",
+             "texture aurora:block/nope not found: no data pack has assets/aurora/textures/block/nope.png"},
+        Case{R"({"id": "aurora:a", "hardness": 1, "textures": {"top": "block/stone"}})", "/textures",
+             "no texture for the bottom face"},
+        Case{R"({"id": "aurora:a", "hardness": 1, "textures": {"top": "block/stone", "bottom": "block/stone"}})",
+             "/textures", "no texture for the north face; set 'north', 'side' or 'all'"},
+        // States
+        Case{R"({"id": "aurora:a", "hardness": 1, "textures": {"all": "block/stone"}, "states": ["x"]})", "/states",
+             "expected an object"},
+        Case{R"({"id": "aurora:a", "hardness": 1, "textures": {"all": "block/stone"}, "states": {"axis": []}})",
+             "/states/axis", "non-empty array"},
+        Case{R"({"id": "aurora:a", "hardness": 1, "textures": {"all": "block/stone"}, "states": {"Axis": ["x"]}})",
+             "/states/Axis", "[a-z0-9_] only"},
+        Case{R"({"id": "aurora:a", "hardness": 1, "textures": {"all": "block/stone"},
+                 "states": {"axis": ["x", "Y"]}})",
+             "/states/axis/1", "[a-z0-9_] strings"},
+        Case{R"({"id": "aurora:a", "hardness": 1, "textures": {"all": "block/stone"},
+                 "states": {"axis": ["x", "x"]}})",
+             "/states/axis/1", "listed twice"},
+        Case{R"({"id": "aurora:a", "hardness": 1, "textures": {"all": "block/stone"},
+                 "states": {"axis": ["x", "y"]}, "default_state": {"color": "red"}})",
+             "/default_state/color", "not a property listed in 'states'"},
+        Case{R"({"id": "aurora:a", "hardness": 1, "textures": {"all": "block/stone"},
+                 "states": {"axis": ["x", "y", "z"]}, "default_state": {"axis": "q"}})",
+             "/default_state/axis", "expected one of x, y, z"},
+        Case{R"({"id": "aurora:a", "hardness": 1, "textures": {"all": "block/stone"}, "default_state": 3})",
+             "/default_state", "expected an object"},
+    };
+
+    for (const Case& c : cases) {
+        CAPTURE(c.json);
+        const BlockLoadResult result = loadSingleFile(c.json);
+        INFO(describeIssues(result.issues));
+        CHECK_FALSE(result.registry);
+        CHECK(hasIssue(result.issues, IssueSeverity::Error, "test.json", c.pointer, c.text));
+    }
+}
+
+TEST_CASE("Per-block state combinations are limited before they are built", "[data][loader]")
+{
+    // 3 * 5 * 17 * 257 = 65535: one more than data blocks may use.
+    const BlockLoadResult tooMany = loadSingleFile(blockWithStates("aurora:big", {3, 5, 17, 257}));
+    INFO(describeIssues(tooMany.issues));
+    CHECK(hasIssue(tooMany.issues, IssueSeverity::Error, "test.json", "/states", "more than 65534"));
+
+    // 64^8 = 2^48 combinations fail the same way without being enumerated.
+    const BlockLoadResult huge = loadSingleFile(blockWithStates("aurora:huge", std::vector<std::size_t>(8, 64)));
+    CHECK(hasIssue(huge.issues, IssueSeverity::Error, "test.json", "/states", "more than 65534"));
+
+    // 2 * 7 * 31 * 151 = 65534 fills the 16-bit range exactly.
+    const BlockLoadResult full = loadSingleFile(blockWithStates("aurora:full", {2, 7, 31, 151}));
+    INFO(describeIssues(full.issues));
+    REQUIRE(full.registry);
+    CHECK(full.registry->stateCount() == 65536);
+}
+
+TEST_CASE("Errors in several files are all reported", "[data][loader]")
+{
+    TempGame game("several");
+    game.texture("base", "aurora", "block/stone");
+    game.block("base", "aurora", "a_syntax.json", R"({"id": "aurora:a" "hardness": 1})");
+    game.block("base", "aurora", "b_type.json", R"({"id": "aurora:b", "hardness": "hard", "light": 99,
+                                                    "textures": {"all": "block/stone"}})");
+    game.block("base", "aurora", "c_texture.json", R"({"id": "aurora:c", "hardness": 1,
+                                                       "textures": {"all": "block/missing"}})");
+    game.block("base", "aurora", "d_valid.json", kStone);
+    game.write("base/data/aurora/blocks/notes.txt", "not a block file");
+
+    const BlockLoadResult result = load({game.pack("base", true)});
+    INFO(describeIssues(result.issues));
+    CHECK_FALSE(result.registry);
+    CHECK(result.filesRead == 4);
+    CHECK(hasIssue(result.issues, IssueSeverity::Error, "a_syntax.json", "", "parse error"));
+    CHECK(hasIssue(result.issues, IssueSeverity::Error, "b_type.json", "/hardness", "expected a number"));
+    CHECK(hasIssue(result.issues, IssueSeverity::Error, "b_type.json", "/light", "0-15"));
+    CHECK(hasIssue(result.issues, IssueSeverity::Error, "c_texture.json", "/textures/all", "not found"));
+    CHECK(countIssues(result.issues, IssueSeverity::Error) == 4);
+}
+
+TEST_CASE("Unknown fields and texture slots warn but still load", "[data][loader]")
+{
+    const BlockLoadResult result = loadSingleFile(
+        R"({"id": "aurora:a", "hardness": 1, "hardnes": 2, "textures": {"all": "block/stone", "topp": "block/x"}})");
+    INFO(describeIssues(result.issues));
+    REQUIRE(result.registry);
+    CHECK(hasIssue(result.issues, IssueSeverity::Warning, "test.json", "/hardnes", "unknown field 'hardnes'"));
+    CHECK(hasIssue(result.issues, IssueSeverity::Warning, "test.json", "/textures/topp", "unknown texture slot"));
+    CHECK(countIssues(result.issues, IssueSeverity::Error) == 0);
+}
+
+TEST_CASE("The same block id twice in one pack is an error", "[data][loader]")
+{
+    TempGame game("duplicate");
+    game.texture("base", "aurora", "block/stone");
+    game.block("base", "aurora", "a.json", kStone);
+    game.block("base", "aurora", "b.json", kStone);
+
+    const BlockLoadResult result = load({game.pack("base", true)});
+    INFO(describeIssues(result.issues));
+    CHECK_FALSE(result.registry);
+    CHECK(hasIssue(result.issues, IssueSeverity::Error, "b.json", "/id", "already defined in"));
+    CHECK(hasIssue(result.issues, IssueSeverity::Error, "b.json", "/id", "a.json (same data pack 'base')"));
+}
+
+TEST_CASE("A later pack replaces a block with textures from its own folder", "[data][loader]")
+{
+    TempGame game("override");
+    game.texture("base", "aurora", "block/stone");
+    game.block("base", "aurora", "stone.json", kStone);
+    game.block("mod", "fancy", "stone.json",
+               R"({"id": "aurora:stone", "hardness": 9, "textures": {"all": "block/fancy_stone"}})");
+
+    SECTION("texture present in the mod")
+    {
+        game.texture("mod", "fancy", "block/fancy_stone");
+        const BlockLoadResult result = load({game.pack("base", true), game.pack("mod")});
+        INFO(describeIssues(result.issues));
+        REQUIRE(result.registry);
+        CHECK(hasIssue(result.issues, IssueSeverity::Info, "stone.json", "/id", "replaces aurora:stone"));
+
+        const BlockDefinition& stone = *result.registry->findBlock("aurora:stone");
+        CHECK(stone.hardness == 9.0f);
+        CHECK(stone.sourcePack == "mod");
+        // No namespace in the reference: the folder the file is in (data/fancy), not the block id's namespace.
+        CHECK(stone.faceTextures[0].str() == "fancy:block/fancy_stone");
+    }
+    SECTION("texture missing is reported against the mod file")
+    {
+        const BlockLoadResult result = load({game.pack("base", true), game.pack("mod")});
+        INFO(describeIssues(result.issues));
+        CHECK_FALSE(result.registry);
+        bool reportedInMod = false;
+        for (const LoadIssue& issue : result.issues) {
+            reportedInMod = reportedInMod || (issue.pointer == "/textures/all" &&
+                                              issue.file == game.root() / "mod/data/fancy/blocks/stone.json");
+        }
+        CHECK(reportedInMod);
+    }
+}
+
+TEST_CASE("An explicit namespace reaches another pack's textures", "[data][loader]")
+{
+    TempGame game("cross_pack");
+    game.texture("base", "aurora", "block/stone");
+    game.block("base", "aurora", "stone.json", kStone);
+    game.block("mod", "fancy", "pillar.json",
+               R"({"id": "fancy:pillar", "hardness": 1, "textures": {"all": "aurora:block/stone"}})");
+
+    const BlockLoadResult result = load({game.pack("base", true), game.pack("mod")});
+    INFO(describeIssues(result.issues));
+    REQUIRE(result.registry);
+    CHECK(result.registry->findBlock("fancy:pillar")->faceTextures[0].str() == "aurora:block/stone");
+}
+
+TEST_CASE("The total state limit applies to the final set after replacements", "[data][loader]")
+{
+    TempGame game("final_set");
+    game.texture("base", "aurora", "block/stone");
+    game.block("base", "aurora", "big.json", blockWithStates("aurora:big", {2, 7, 31, 151})); // 65534 states
+    game.block("base", "aurora", "small.json",
+               R"({"id": "aurora:small", "hardness": 1, "textures": {"all": "block/stone"}})");
+    game.block("mod", "aurora", "big.json",
+               R"({"id": "aurora:big", "hardness": 1, "textures": {"all": "block/stone"}})");
+
+    // The base pack alone needs 65534 + 1 + 2 built-ins = 65537 states.
+    const BlockLoadResult baseOnly = load({game.pack("base", true)});
+    INFO(describeIssues(baseOnly.issues));
+    CHECK_FALSE(baseOnly.registry);
+    CHECK(hasIssue(baseOnly.issues, IssueSeverity::Error, "", "", "Too many block states: 65537"));
+
+    // The mod replaces the big block with a one-state one; the replaced definition no longer counts.
+    const BlockLoadResult withMod = load({game.pack("base", true), game.pack("mod")});
+    INFO(describeIssues(withMod.issues));
+    REQUIRE(withMod.registry);
+    CHECK(withMod.registry->stateCount() == 4);
+}
+
+TEST_CASE("State numbers do not depend on file names or order", "[data][loader]")
+{
+    TempGame game("order");
+    game.texture("one", "aurora", "block/stone");
+    game.texture("two", "aurora", "block/stone");
+    const std::string log = R"({"id": "aurora:log", "hardness": 1, "textures": {"all": "block/stone"},
+                               "states": {"axis": ["x", "y", "z"], "bark": ["no", "yes"]}})";
+    const std::string dirt = R"({"id": "aurora:dirt", "hardness": 1, "textures": {"all": "block/stone"}})";
+    game.block("one", "aurora", "a.json", log);
+    game.block("one", "aurora", "b.json", dirt);
+    game.block("one", "aurora", "c.json", kStone);
+    game.block("two", "aurora", "a.json", kStone);
+    game.block("two", "aurora", "b.json", log);
+    game.block("two", "aurora", "c.json", dirt);
+
+    const BlockLoadResult first = load({game.pack("one", true)});
+    const BlockLoadResult second = load({game.pack("two", true)});
+    REQUIRE(first.registry);
+    REQUIRE(second.registry);
+    REQUIRE(first.registry->stateCount() == second.registry->stateCount());
+    for (std::uint32_t state = 0; state < first.registry->stateCount(); ++state) {
+        const auto id = static_cast<BlockStateId>(state);
+        CHECK(first.registry->stateToString(id) == second.registry->stateToString(id));
+    }
+}
+
+TEST_CASE("Data pack folders are checked", "[data][loader]")
+{
+    TempGame game("folders");
+
+    SECTION("the base pack needs data/aurora/blocks")
+    {
+        game.write("base/readme.txt", "empty pack");
+        const BlockLoadResult result = load({game.pack("base", true)});
+        INFO(describeIssues(result.issues));
+        CHECK_FALSE(result.registry);
+        CHECK(hasIssue(result.issues, IssueSeverity::Error, "blocks", "", "must have this folder"));
+    }
+    SECTION("an empty blocks folder only warns")
+    {
+        std::filesystem::create_directories(game.root() / "base/data/aurora/blocks");
+        const BlockLoadResult result = load({game.pack("base", true)});
+        INFO(describeIssues(result.issues));
+        REQUIRE(result.registry);
+        CHECK(result.registry->blockCount() == 2);
+        CHECK(hasIssue(result.issues, IssueSeverity::Warning, "blocks", "", "no block files"));
+    }
+    SECTION("a mod without blocks is fine")
+    {
+        game.texture("base", "aurora", "block/stone");
+        game.block("base", "aurora", "stone.json", kStone);
+        game.write("mod/data/fancy/items/readme.txt", "items come later");
+        const BlockLoadResult result = load({game.pack("base", true), game.pack("mod")});
+        INFO(describeIssues(result.issues));
+        REQUIRE(result.registry);
+        CHECK(result.issues.empty());
+    }
+    SECTION("a missing pack folder and a bad namespace folder are errors")
+    {
+        game.texture("base", "aurora", "block/stone");
+        game.block("base", "aurora", "stone.json", kStone);
+        game.block("base", "Bad_Name", "x.json", kStone);
+        const BlockLoadResult result = load({game.pack("base", true), game.pack("absent")});
+        INFO(describeIssues(result.issues));
+        CHECK_FALSE(result.registry);
+        CHECK(hasIssue(result.issues, IssueSeverity::Error, "absent", "", "folder not found"));
+        CHECK(hasIssue(result.issues, IssueSeverity::Error, "Bad_Name", "", "not a valid namespace"));
+    }
+}
+
+TEST_CASE("The shipped game data loads without any issue", "[data][loader]")
+{
+    const std::filesystem::path gameFolder = std::filesystem::path(AURORA_SOURCE_DIR) / "game";
+    const BlockLoadResult result = load({DataPack{"aurora", gameFolder, true}});
+    INFO(describeIssues(result.issues));
+    REQUIRE(result.registry);
+    CHECK(result.issues.empty());
+
+    const BlockRegistry& registry = *result.registry;
+    CHECK(blockIds(registry) ==
+          std::vector<std::string>{"aurora:air", "aurora:unknown", "aurora:cobblestone", "aurora:dirt",
+                                   "aurora:grass_block", "aurora:oak_log", "aurora:oak_planks", "aurora:stone"});
+    CHECK(registry.blockCount() == 8);
+    CHECK(registry.stateCount() == 10);
+    CHECK(registry.stateToString(registry.findBlock("aurora:oak_log")->defaultState) == "aurora:oak_log[axis=y]");
+    CHECK(registry.findBlock("aurora:stone")->hardness == 1.5f);
+    CHECK(registry.findBlock("aurora:grass_block")->faceTextures[static_cast<std::size_t>(BlockFace::Down)].str() ==
+          "aurora:block/dirt");
+}

@@ -1,0 +1,6 @@
+{
+  "id": "aurora:dirt",
+  "hardness": 0.5,
+  "tool": "shovel",
+  "textures": { "all": "block/dirt" }
+}

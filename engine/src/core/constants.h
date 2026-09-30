@@ -24,6 +24,9 @@ inline constexpr std::int32_t kWorldMaxY = 320;
 inline constexpr std::int32_t kWorldHeight = kWorldMaxY - kWorldMinY;
 inline constexpr std::int32_t kSectionsPerChunk = kWorldHeight / kSectionSize;
 
+// Block state ids are 16-bit: at most this many states, including the built-in air and unknown states.
+inline constexpr std::uint32_t kMaxBlockStates = 1u << 16;
+
 // Gameplay limits enforced by rules, inside the internal range.
 inline constexpr std::int32_t kBedrockY = -50;
 inline constexpr std::int32_t kBuildLimitY = 300;

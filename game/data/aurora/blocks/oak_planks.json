@@ -1,0 +1,6 @@
+{
+  "id": "aurora:oak_planks",
+  "hardness": 2.0,
+  "tool": "axe",
+  "textures": { "all": "block/oak_planks" }
+}

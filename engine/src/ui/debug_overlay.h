@@ -3,6 +3,7 @@
 #include "server/server_stats.h"
 
 #include <cstddef>
+#include <cstdint>
 
 namespace aurora::core {
 class TimingHistory;
@@ -25,6 +26,8 @@ struct DebugOverlayData {
     server::ServerStats server;
     std::size_t workerCount = 0;
     std::size_t pendingJobs = 0;
+    std::size_t blockCount = 0;
+    std::uint32_t blockStateCount = 0;
 };
 
 // F3 debug screen: a translucent panel in the top-left corner with frame timing, server ticks, workers,

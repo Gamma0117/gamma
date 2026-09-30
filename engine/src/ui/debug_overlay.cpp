@@ -99,6 +99,7 @@ void DebugOverlay::draw(platform::Window& window, const render::Renderer& render
         ImGui::Separator();
         drawServerSection(data);
         ImGui::Text("Workers %zu (pending jobs %zu)", data.workerCount, data.pendingJobs);
+        ImGui::Text("Blocks %zu (%u states)", data.blockCount, static_cast<unsigned>(data.blockStateCount));
         ImGui::Separator();
         drawSystemSection(window, renderer);
         ImGui::TextDisabled("F3: hide");

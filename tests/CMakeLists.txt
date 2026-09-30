@@ -7,12 +7,33 @@ add_executable(aurora_tests
     core/sanity_tests.cpp
     core/tick_scheduler_tests.cpp
     core/timing_history_tests.cpp
+    data/block_loader_tests.cpp
+    data/block_registry_tests.cpp
+    data/game_directory_tests.cpp
+    data/resource_id_tests.cpp
     server/integrated_server_tests.cpp
 )
-target_link_libraries(aurora_tests PRIVATE aurora::core aurora::server Catch2::Catch2WithMain)
+target_link_libraries(aurora_tests PRIVATE aurora::core aurora::data aurora::server Catch2::Catch2WithMain)
+# The shipped game data is loaded by a test. UTF-8 literal for non-ASCII checkout paths on Windows.
+target_compile_definitions(aurora_tests PRIVATE "AURORA_SOURCE_DIR=u8\"${PROJECT_SOURCE_DIR}\"")
 aurora_set_warnings(aurora_tests)
 # The timeout turns a hang (e.g. a deadlocked shutdown) into a failure instead of a stuck run.
 catch_discover_tests(aurora_tests PROPERTIES TIMEOUT 60)
+
+# Start-up with bad game data or a bad --game-dir: every problem is logged and the game exits with code 1 before
+# any window exists (no display needed, and any GLFW or window log line fails the test).
+add_test(NAME app_game_dir_missing
+    COMMAND "${CMAKE_COMMAND}" -DAPP=$<TARGET_FILE:aurora> "-DGAME_DIR=${CMAKE_CURRENT_BINARY_DIR}/no_such_game"
+            -DEXPECT_EXIT=1 -DNO_DISPLAY=ON "-DEXPECT1=--game-dir .*no_such_game is not an existing folder"
+            "-DFORBID=Game folder:|Loaded|GLFW|Window|OpenGL" -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/run_app.cmake")
+add_test(NAME app_data_errors
+    COMMAND "${CMAKE_COMMAND}" -DAPP=$<TARGET_FILE:aurora>
+            "-DGAME_DIR=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/broken_game" -DEXPECT_EXIT=1 -DNO_DISPLAY=ON
+            "-DEXPECT1=broken_hardness.json /hardness: expected a number >= 0, got string \"abc\""
+            "-DEXPECT2=syntax_error.json: parse error at line 5"
+            "-DEXPECT3=Block data has 3 error\\(s\\)"
+            "-DFORBID=GLFW|Window|OpenGL" -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/run_app.cmake")
+set_tests_properties(app_game_dir_missing app_data_errors PROPERTIES LABELS app TIMEOUT 60)
 
 # Headless smoke test: open the real window under Xvfb (Mesa llvmpipe), draw the F3 overlay and exit after a
 # few frames.

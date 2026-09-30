@@ -6,6 +6,7 @@ find_package(Tracy CONFIG REQUIRED)
 find_package(glfw3 CONFIG REQUIRED)
 find_package(glad CONFIG REQUIRED)
 find_package(imgui CONFIG REQUIRED)
+find_package(nlohmann_json CONFIG REQUIRED)
 
 # The overlay triplets build Tracy with TRACY_ENABLE; without it every profiler macro compiles to nothing.
 get_target_property(AURORA_TRACY_DEFINITIONS Tracy::TracyClient INTERFACE_COMPILE_DEFINITIONS)
@@ -40,6 +41,21 @@ target_link_libraries(aurora_platform
     PRIVATE glfw glad::glad
 )
 aurora_set_warnings(aurora_platform)
+
+# data: game content loaded from game/data JSON (block registry). JSON stays out of the public headers.
+add_library(aurora_data STATIC
+    src/data/block_loader.cpp
+    src/data/block_registry.cpp
+    src/data/game_directory.cpp
+    src/data/load_issue.cpp
+    src/data/resource_id.cpp
+)
+add_library(aurora::data ALIAS aurora_data)
+target_link_libraries(aurora_data
+    PUBLIC aurora::core
+    PRIVATE nlohmann_json::nlohmann_json
+)
+aurora_set_warnings(aurora_data)
 
 # server: authoritative simulation on its own fixed-rate thread. Knows nothing about render or ui.
 add_library(aurora_server STATIC

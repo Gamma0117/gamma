@@ -1,0 +1,6 @@
+{
+  "id": "aurora:grass_block",
+  "hardness": 0.6,
+  "tool": "shovel",
+  "textures": { "top": "block/grass_block_top", "bottom": "block/dirt", "side": "block/grass_block_side" }
+}
