@@ -1,0 +1,28 @@
+# ThreadSanitizer suppression for the Mesa llvmpipe software driver (Xvfb smoke runs only).
+#
+# Use:    TSAN_OPTIONS=suppressions=<repo>/tools/sanitizers/tsan_mesa_llvmpipe.supp ctest -R app_smoke
+# Scope:  hides EVERY race report with a libgallium frame in either stack, so it is only for runs that open a
+#         window (app_smoke, the app itself). Unit tests (core, data, world, server, jobs) need no suppression and
+#         must be run without it.
+# Status: presumed false positive, cause not confirmed. Recorded 2026-09-30 while checking c4f8b99.
+#
+# Seen with: GCC 13.3 -fsanitize=thread Debug build, Xvfb + Mesa 25.2.8-0ubuntu0.24.04.3 llvmpipe (LLVM 20.1.2,
+# 256 bits), `app/aurora --frames 120 --debug-overlay`. It appeared under load only: in 9 of 12 runs with four
+# instances at once, and in 2 `ctest -j4` runs; single runs were clean. Each failing run reported the same two
+# races and exited with code 66. With this file 12 of 12 loaded runs and 3 of 3 `ctest -j4` runs were clean.
+#
+# The two reports (libgallium has no symbols; addresses from the Ubuntu build):
+#   1. Write by the main thread in pthread_mutex_destroy, called from libgallium+0x862f6f, reached from the
+#      window.swapBuffers() call in app/main.cpp; previous atomic read by thread 'llvmpipe-2' in
+#      pthread_mutex_lock from libgallium+0x599fbc.
+#   2. Write by the main thread in pthread_cond_destroy (libgallium+0x862f78, same call); previous read by
+#      'llvmpipe-2' in pthread_cond_broadcast (libgallium+0x599e3c).
+#   Both objects: a 120-byte heap block calloc'ed by libgallium+0x862efc during imgui.endFrame() (the frame's GL
+#   draw calls); the mutex was created by libgallium when the window and GL context were made; llvmpipe-2 is a
+#   Mesa worker thread started then. No frame of engine code sits between the app call and the driver.
+#
+# Reading: llvmpipe signals a per-frame fence from its worker and the main thread destroys it at swap. Mesa is not
+# built with TSan, so ordering it provides internally (e.g. through futexes or atomics) is invisible to TSan and
+# a destroy after the last signal can be reported as a race. Confirming this needs an instrumented Mesa or a
+# reading of its fence code; until then treat it as unexplained driver behaviour, not as proof of a clean app.
+race:libgallium
