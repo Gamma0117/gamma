@@ -1,6 +1,15 @@
 find_package(Catch2 3 CONFIG REQUIRED)
 include(Catch)
 
+# Catch2 splits a test-name filter at commas, so a test whose name has a comma cannot be run on its own by name.
+file(GLOB_RECURSE AURORA_TEST_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
+foreach(source IN LISTS AURORA_TEST_SOURCES)
+    file(STRINGS "${source}" names_with_commas REGEX "TEST_CASE\\(\"[^\"]*,[^\"]*\"")
+    if(names_with_commas)
+        message(FATAL_ERROR "Test names must not contain commas (${source}): ${names_with_commas}")
+    endif()
+endforeach()
+
 add_executable(aurora_tests
     core/job_system_tests.cpp
     core/log_tests.cpp

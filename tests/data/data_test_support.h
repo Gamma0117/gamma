@@ -72,6 +72,16 @@ private:
     std::filesystem::path m_root;
 };
 
+// Makes `link` a symbolic link to itself: every status query on it fails (ELOOP), even for root, which ignores
+// permission bits. False where symlinks cannot be created (e.g. Windows without developer mode).
+inline bool makeSelfLoop(const std::filesystem::path& link)
+{
+    std::error_code error;
+    std::filesystem::create_directories(link.parent_path(), error);
+    std::filesystem::create_symlink(link.filename(), link, error);
+    return !error;
+}
+
 // Every issue on its own line, for failure messages.
 inline std::string describeIssues(const std::vector<data::LoadIssue>& issues)
 {

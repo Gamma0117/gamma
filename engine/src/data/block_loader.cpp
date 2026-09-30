@@ -19,6 +19,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <unordered_set>
 #include <utility>
 
 namespace aurora::data {
@@ -266,15 +267,22 @@ void readId(const Json& root, BlockDefinition& block, FileIssues& issues)
     }
 }
 
+// Exactly one of "hardness" (a breakable block) or "unbreakable": true.
 void readBreaking(const Json& root, BlockDefinition& block, FileIssues& issues)
 {
-    if (const Json* value = findField(root, "unbreakable")) {
-        block.unbreakable = readBool(*value, "/unbreakable", issues).value_or(false);
-    }
+    const Json* unbreakable = findField(root, "unbreakable");
     const Json* hardness = findField(root, "hardness");
-    if (block.unbreakable && hardness != nullptr) {
-        issues.error("/hardness", "an unbreakable block has no hardness; remove one of the two fields");
-    } else if (!block.unbreakable && hardness == nullptr) {
+    if (unbreakable != nullptr) {
+        const std::optional<bool> value = readBool(*unbreakable, "/unbreakable", issues);
+        if (value == false) {
+            issues.error("/unbreakable", "only \"unbreakable\": true is allowed; a breakable block gives "
+                                         "'hardness' instead");
+        }
+        block.unbreakable = value.value_or(false);
+    }
+    if (unbreakable != nullptr && hardness != nullptr) {
+        issues.error("/hardness", "give either 'hardness' or \"unbreakable\": true, not both");
+    } else if (unbreakable == nullptr && hardness == nullptr) {
         issues.error({}, "missing required field 'hardness' (or set \"unbreakable\": true)");
     } else if (hardness != nullptr) {
         block.hardness = readNonNegative(*hardness, "/hardness", issues).value_or(0.0f);
@@ -311,18 +319,28 @@ void readLook(const Json& root, BlockDefinition& block, FileIssues& issues)
     }
 }
 
-std::optional<fs::path> findTextureFile(std::span<const DataPack> packs, const ResourceId& texture)
+struct TextureLookup {
+    bool found = false;
+    std::string failure; // Set when a candidate file exists but cannot be checked (permissions, I/O).
+};
+
+// Looks for assets/<ns>/textures/<path>.png in the packs, later packs first.
+TextureLookup findTextureFile(std::span<const DataPack> packs, const ResourceId& texture)
 {
     const fs::path relative = fs::path("assets") / std::string(texture.nameSpace()) / "textures" /
                               (std::string(texture.path()) + ".png");
     for (auto pack = packs.rbegin(); pack != packs.rend(); ++pack) {
-        std::error_code error;
         const fs::path candidate = pack->root / relative;
-        if (fs::is_regular_file(candidate, error)) {
-            return candidate;
+        std::error_code error;
+        const fs::file_status status = fs::status(candidate, error);
+        if (status.type() == fs::file_type::regular) {
+            return {true, {}};
+        }
+        if (status.type() != fs::file_type::not_found && error) {
+            return {false, std::format("cannot check {}: {}", core::pathToUtf8(candidate), error.message())};
         }
     }
-    return std::nullopt;
+    return {};
 }
 
 void readTextures(const Json& root, std::string_view dataNamespace, std::span<const DataPack> packs,
@@ -402,12 +420,17 @@ void readTextures(const Json& root, std::string_view dataNamespace, std::span<co
 
     std::set<std::string> checked;
     for (const auto& [key, texture] : refs) {
-        if (!checked.insert(texture.str()).second || findTextureFile(packs, texture)) {
+        if (!checked.insert(texture.str()).second) {
             continue;
         }
-        issues.error(childPointer("/textures", key),
-                     std::format("texture {} not found: no data pack has assets/{}/textures/{}.png", texture.str(),
-                                 texture.nameSpace(), texture.path()));
+        const TextureLookup lookup = findTextureFile(packs, texture);
+        if (!lookup.failure.empty()) {
+            issues.error(childPointer("/textures", key), lookup.failure);
+        } else if (!lookup.found) {
+            issues.error(childPointer("/textures", key),
+                         std::format("texture {} not found: no data pack has assets/{}/textures/{}.png", texture.str(),
+                                     texture.nameSpace(), texture.path()));
+        }
     }
 }
 
@@ -436,6 +459,10 @@ void readStates(const Json& root, BlockDefinition& block, FileIssues& issues)
                 continue;
             }
             BlockProperty property{name, {}};
+            // Separate set for the duplicate check: values keep their data-file order, and a property may have
+            // tens of thousands of values, so a linear search per value would be quadratic.
+            std::unordered_set<std::string> seen;
+            seen.reserve(values.size());
             for (std::size_t i = 0; i < values.size(); ++i) {
                 const Json& value = values[i];
                 const std::string itemPointer = std::format("{}/{}", pointer, i);
@@ -444,8 +471,8 @@ void readStates(const Json& root, BlockDefinition& block, FileIssues& issues)
                     valid = false;
                     continue;
                 }
-                const std::string text = value.get<std::string>();
-                if (std::ranges::find(property.values, text) != property.values.end()) {
+                const std::string& text = value.get_ref<const std::string&>();
+                if (!seen.insert(text).second) {
                     issues.error(itemPointer, std::format("value '{}' is listed twice", text));
                     valid = false;
                     continue;
@@ -525,21 +552,50 @@ std::optional<BlockDefinition> readBlock(const Json& root, std::string_view data
     return block;
 }
 
-// Sorted entries of `folder` that are sub-folders, or regular files with `extension`. A missing folder is empty.
+enum class FolderState {
+    Present,
+    Missing, // Does not exist; the caller decides whether that is allowed.
+    Failed,  // Exists but cannot be used (permissions, I/O, not a folder); already reported.
+};
+
+FolderState checkFolder(const fs::path& folder, std::vector<LoadIssue>& issues)
+{
+    std::error_code error;
+    const fs::file_status status = fs::status(folder, error);
+    if (status.type() == fs::file_type::not_found) {
+        return FolderState::Missing;
+    }
+    if (error) {
+        issues.push_back(
+            {IssueSeverity::Error, folder, {}, std::format("cannot access the folder: {}", error.message())});
+        return FolderState::Failed;
+    }
+    if (status.type() != fs::file_type::directory) {
+        issues.push_back({IssueSeverity::Error, folder, {}, "expected a folder, found something else"});
+        return FolderState::Failed;
+    }
+    return FolderState::Present;
+}
+
+// Sorted entries of an existing `folder`: its sub-folders, or its regular files with `extension`. An entry whose
+// type cannot be read (permissions, a broken or looping link) is reported, never skipped silently.
 std::vector<fs::path> listFolder(const fs::path& folder, bool wantFolders, std::string_view extension,
                                  std::vector<LoadIssue>& issues)
 {
     std::vector<fs::path> entries;
     std::error_code error;
-    if (!fs::is_directory(folder, error)) {
-        return entries;
-    }
     fs::directory_iterator it(folder, error);
-    for (; !error && it != fs::directory_iterator(); it.increment(error)) {
-        const bool isFolder = it->is_directory(error);
-        if (wantFolders ? isFolder : (!isFolder && it->is_regular_file(error) && it->path().extension() == extension)) {
+    while (!error && it != fs::directory_iterator()) {
+        std::error_code entryError;
+        const fs::file_status status = it->status(entryError);
+        if (entryError) {
+            issues.push_back({IssueSeverity::Error, it->path(), {},
+                              std::format("cannot read this entry: {}", entryError.message())});
+        } else if (wantFolders ? status.type() == fs::file_type::directory
+                               : status.type() == fs::file_type::regular && it->path().extension() == extension) {
             entries.push_back(it->path());
         }
+        it.increment(error);
     }
     if (error) {
         issues.push_back(
@@ -564,21 +620,26 @@ BlockLoadResult loadBlocks(std::span<const DataPack> packs)
 
     for (std::size_t packIndex = 0; packIndex < packs.size(); ++packIndex) {
         const DataPack& pack = packs[packIndex];
-        std::error_code error;
-        if (!fs::is_directory(pack.root, error)) {
+        const FolderState rootState = checkFolder(pack.root, result.issues);
+        if (rootState == FolderState::Missing) {
             result.issues.push_back(
                 {IssueSeverity::Error, pack.root, {}, std::format("data pack '{}': folder not found", pack.name)});
+        }
+        if (rootState != FolderState::Present) {
             continue;
         }
+
+        // Missing folders are fine (a mod may add no blocks); unreadable ones are errors, so no data is skipped
+        // silently.
         const fs::path dataFolder = pack.root / "data";
-        const fs::path baseBlocks = dataFolder / std::string(kBaseNamespace) / "blocks";
-        if (pack.isBase && !fs::is_directory(baseBlocks, error)) {
-            result.issues.push_back({IssueSeverity::Error, baseBlocks, {},
-                                     std::format("the base data pack '{}' must have this folder", pack.name)});
-        }
+        const FolderState dataState = checkFolder(dataFolder, result.issues);
+        const std::vector<fs::path> namespaceFolders =
+            dataState == FolderState::Present ? listFolder(dataFolder, true, {}, result.issues)
+                                               : std::vector<fs::path>{};
 
         std::map<std::string, fs::path, std::less<>> idsInPack;
-        for (const fs::path& namespaceFolder : listFolder(dataFolder, true, {}, result.issues)) {
+        bool baseBlocksFound = false;
+        for (const fs::path& namespaceFolder : namespaceFolders) {
             const std::string dataNamespace = core::pathToUtf8(namespaceFolder.filename());
             if (!isValidName(dataNamespace)) {
                 result.issues.push_back({IssueSeverity::Error, namespaceFolder, {},
@@ -586,9 +647,14 @@ BlockLoadResult loadBlocks(std::span<const DataPack> packs)
                 continue;
             }
             const fs::path blocksFolder = namespaceFolder / "blocks";
-            const std::vector<fs::path> files = listFolder(blocksFolder, false, ".json", result.issues);
+            const FolderState blocksState = checkFolder(blocksFolder, result.issues);
             const bool isBaseBlocks = pack.isBase && dataNamespace == kBaseNamespace;
-            if (isBaseBlocks && files.empty() && fs::is_directory(blocksFolder, error)) {
+            baseBlocksFound = baseBlocksFound || (isBaseBlocks && blocksState != FolderState::Missing);
+            if (blocksState != FolderState::Present) {
+                continue;
+            }
+            const std::vector<fs::path> files = listFolder(blocksFolder, false, ".json", result.issues);
+            if (isBaseBlocks && files.empty()) {
                 result.issues.push_back({IssueSeverity::Warning, blocksFolder, {}, "no block files"});
             }
 
@@ -619,6 +685,13 @@ BlockLoadResult loadBlocks(std::span<const DataPack> packs)
                     finalBlocks.emplace(id, Loaded{std::move(*block), packIndex});
                 }
             }
+        }
+
+        // An unreadable data folder is already reported; do not add a misleading "missing" on top.
+        if (pack.isBase && !baseBlocksFound && dataState != FolderState::Failed) {
+            const fs::path baseBlocks = dataFolder / std::string(kBaseNamespace) / "blocks";
+            result.issues.push_back({IssueSeverity::Error, baseBlocks, {},
+                                     std::format("the base data pack '{}' must have this folder", pack.name)});
         }
     }
 

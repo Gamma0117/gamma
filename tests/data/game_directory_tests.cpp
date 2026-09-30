@@ -27,6 +27,25 @@ TEST_CASE("An explicit game folder is used as is and never replaced", "[data][ga
     CHECK(missing.error.find("--game-dir") != std::string::npos);
 }
 
+TEST_CASE("A game folder that cannot be inspected is an error and not a reason to look elsewhere",
+          "[data][game_dir]")
+{
+    TempGame game("game_dir_unreadable");
+    game.write("good/data/aurora/blocks/stone.json", "{}");
+    if (!aurora::test::makeSelfLoop(game.root() / "looped") ||
+        !aurora::test::makeSelfLoop(game.root() / "odd" / "data" / "aurora")) {
+        SKIP("symbolic links are not available here");
+    }
+
+    const auto explicitLoop = resolveGameDirectory(game.root() / "looped", {game.root() / "good"});
+    CHECK(explicitLoop.path.empty());
+    CHECK(explicitLoop.error.find("cannot access --game-dir") != std::string::npos);
+
+    const auto candidateLoop = resolveGameDirectory(std::nullopt, {game.root() / "odd", game.root() / "good"});
+    CHECK(candidateLoop.path.empty());
+    CHECK(candidateLoop.error.find("cannot access") != std::string::npos);
+}
+
 TEST_CASE("Without --game-dir the first candidate with data/aurora is used", "[data][game_dir]")
 {
     TempGame game("game_dir_search");

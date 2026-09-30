@@ -11,18 +11,31 @@ namespace aurora::data {
 GameDirectory resolveGameDirectory(const std::optional<std::filesystem::path>& explicitFolder,
                                    const std::vector<std::filesystem::path>& candidates)
 {
+    namespace fs = std::filesystem;
     std::error_code error;
     if (explicitFolder) {
-        if (std::filesystem::is_directory(*explicitFolder, error)) {
+        const fs::file_status status = fs::status(*explicitFolder, error);
+        if (status.type() == fs::file_type::directory) {
             return {*explicitFolder, {}};
         }
-        return {{}, std::format("--game-dir {} is not an existing folder", core::pathToUtf8(*explicitFolder))};
+        if (status.type() == fs::file_type::not_found || !error) {
+            return {{}, std::format("--game-dir {} is not an existing folder", core::pathToUtf8(*explicitFolder))};
+        }
+        return {{}, std::format("cannot access --game-dir {}: {}", core::pathToUtf8(*explicitFolder),
+                                error.message())};
     }
 
     std::string tried;
-    for (const std::filesystem::path& candidate : candidates) {
-        if (std::filesystem::is_directory(candidate / "data" / std::string(kBaseNamespace), error)) {
+    for (const fs::path& candidate : candidates) {
+        // A candidate that exists but cannot be inspected stops the search: falling through to the next folder
+        // would silently load different data.
+        const fs::path marker = candidate / "data" / std::string(kBaseNamespace);
+        const fs::file_status status = fs::status(marker, error);
+        if (status.type() == fs::file_type::directory) {
             return {candidate, {}};
+        }
+        if (status.type() != fs::file_type::not_found && error) {
+            return {{}, std::format("cannot access {}: {}", core::pathToUtf8(marker), error.message())};
         }
         tried += std::format("{}{}", tried.empty() ? "" : ", ", core::pathToUtf8(candidate));
     }

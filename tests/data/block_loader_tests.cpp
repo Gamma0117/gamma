@@ -5,6 +5,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <chrono>
 #include <filesystem>
 #include <format>
 #include <string>
@@ -162,7 +163,13 @@ TEST_CASE("Each kind of bad block file is reported with its field", "[data][load
         Case{R"({"id": "aurora:a", "hardness": 1e300, "textures": {"all": "block/stone"}})", "/hardness",
              "finite number >= 0"},
         Case{R"({"id": "aurora:a", "hardness": 1, "unbreakable": true, "textures": {"all": "block/stone"}})",
-             "/hardness", "remove one of the two"},
+             "/hardness", "not both"},
+        Case{R"({"id": "aurora:a", "hardness": 1, "unbreakable": false, "textures": {"all": "block/stone"}})",
+             "/unbreakable", "only \"unbreakable\": true is allowed"},
+        Case{R"({"id": "aurora:a", "hardness": 1, "unbreakable": false, "textures": {"all": "block/stone"}})",
+             "/hardness", "not both"},
+        Case{R"({"id": "aurora:a", "unbreakable": false, "textures": {"all": "block/stone"}})", "/unbreakable",
+             "only \"unbreakable\": true is allowed"},
         Case{R"({"id": "aurora:a", "unbreakable": "yes", "textures": {"all": "block/stone"}})", "/unbreakable",
              "expected true or false"},
         Case{R"({"id": "aurora:a", "hardness": 1, "explosion_resistance": -5, "textures": {"all": "block/stone"}})",
@@ -239,6 +246,110 @@ TEST_CASE("Per-block state combinations are limited before they are built", "[da
     REQUIRE(full.registry);
     CHECK(full.registry->stateCount() == 65536);
 }
+
+TEST_CASE("One property may hold every available value", "[data][loader]")
+{
+    // 65534 values in a single array: the most a data set may use. The duplicate check must stay linear.
+    const BlockLoadResult result = loadSingleFile(blockWithStates("aurora:variants", {kMaxDataBlockStates}));
+    INFO(describeIssues(result.issues));
+    REQUIRE(result.registry);
+    CHECK(result.registry->stateCount() == 65536);
+    CHECK(result.registry->stateToString(65535) == "aurora:variants[p0=v65533]");
+    CHECK(result.registry->parseState("aurora:variants[p0=v65533]").state == BlockStateId{65535});
+
+    const BlockLoadResult duplicate = loadSingleFile(
+        R"({"id": "aurora:a", "hardness": 1, "textures": {"all": "block/stone"}, "states": {"p": ["a", "b", "a"]}})");
+    CHECK(hasIssue(duplicate.issues, IssueSeverity::Error, "test.json", "/states/p/2", "value 'a' is listed twice"));
+}
+
+TEST_CASE("Unreadable folders or files are errors and are never skipped", "[data][loader]")
+{
+    TempGame game("unreadable");
+    game.texture("base", "aurora", "block/stone");
+    game.block("base", "aurora", "stone.json", kStone);
+    const std::filesystem::path data = game.root() / "base" / "data";
+
+    SECTION("a namespace entry whose type cannot be read")
+    {
+        if (!aurora::test::makeSelfLoop(data / "looped")) {
+            SKIP("symbolic links are not available here");
+        }
+        const BlockLoadResult result = load({game.pack("base", true)});
+        INFO(describeIssues(result.issues));
+        CHECK_FALSE(result.registry);
+        CHECK(hasIssue(result.issues, IssueSeverity::Error, "looped", "", "cannot read this entry"));
+    }
+    SECTION("a blocks folder that cannot be accessed")
+    {
+        std::filesystem::create_directories(data / "fancy");
+        if (!aurora::test::makeSelfLoop(data / "fancy" / "blocks")) {
+            SKIP("symbolic links are not available here");
+        }
+        const BlockLoadResult result = load({game.pack("base", true)});
+        INFO(describeIssues(result.issues));
+        CHECK_FALSE(result.registry);
+        CHECK(hasIssue(result.issues, IssueSeverity::Error, "blocks", "", "cannot access the folder"));
+    }
+    SECTION("a block file entry whose type cannot be read")
+    {
+        if (!aurora::test::makeSelfLoop(data / "aurora" / "blocks" / "looped.json")) {
+            SKIP("symbolic links are not available here");
+        }
+        const BlockLoadResult result = load({game.pack("base", true)});
+        INFO(describeIssues(result.issues));
+        CHECK_FALSE(result.registry);
+        CHECK(hasIssue(result.issues, IssueSeverity::Error, "looped.json", "", "cannot read this entry"));
+    }
+    SECTION("a texture file that cannot be checked")
+    {
+        game.block("base", "aurora", "odd.json",
+                   R"({"id": "aurora:odd", "hardness": 1, "textures": {"all": "block/odd"}})");
+        if (!aurora::test::makeSelfLoop(game.root() / "base/assets/aurora/textures/block/odd.png")) {
+            SKIP("symbolic links are not available here");
+        }
+        const BlockLoadResult result = load({game.pack("base", true)});
+        INFO(describeIssues(result.issues));
+        CHECK_FALSE(result.registry);
+        CHECK(hasIssue(result.issues, IssueSeverity::Error, "odd.json", "/textures/all", "cannot check"));
+    }
+}
+
+#ifndef _WIN32
+TEST_CASE("A namespace folder without permissions is an error", "[data][loader]")
+{
+    TempGame game("permissions");
+    game.texture("base", "aurora", "block/stone");
+    game.texture("base", "fancy", "block/gem");
+    game.block("base", "aurora", "stone.json", kStone);
+    game.block("base", "fancy", "gem.json", R"({"id": "fancy:gem", "hardness": 1, "textures": {"all": "block/gem"}})");
+    const std::filesystem::path fancy = game.root() / "base/data/fancy";
+
+    const BlockLoadResult readable = load({game.pack("base", true)});
+    REQUIRE(readable.registry);
+    CHECK(readable.registry->blockCount() == 4); // While readable, both blocks load.
+
+    std::filesystem::permissions(fancy, std::filesystem::perms::none);
+    struct RestorePermissions {
+        std::filesystem::path path;
+        ~RestorePermissions()
+        {
+            std::error_code error;
+            std::filesystem::permissions(path, std::filesystem::perms::owner_all, error);
+        }
+    } restore{fancy};
+
+    std::error_code probe;
+    [[maybe_unused]] const std::filesystem::directory_iterator probeListing(fancy, probe);
+    if (!probe) {
+        SKIP("permission bits are not enforced for this user (e.g. root)");
+    }
+
+    const BlockLoadResult result = load({game.pack("base", true)});
+    INFO(describeIssues(result.issues));
+    CHECK_FALSE(result.registry); // Never a registry without fancy:gem.
+    CHECK(hasIssue(result.issues, IssueSeverity::Error, "blocks", "", "cannot access the folder"));
+}
+#endif
 
 TEST_CASE("Errors in several files are all reported", "[data][loader]")
 {
