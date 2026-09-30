@@ -1,0 +1,20 @@
+# build
+/build/
+/out/
+/vcpkg_installed/
+CMakeUserPresets.json
+# IDE
+.vs/
+.vscode/
+*.user
+*.suo
+# tools output
+tools/texgen/tex32/
+tools/texgen/skin32/
+tools/texgen/out/
+tools/texgen/__pycache__/
+tools/motion_viewer/node_modules/
+tools/motion_viewer/viewer.html
+tools/motion_viewer/viewer_full.html
+# saves
+/saves/
