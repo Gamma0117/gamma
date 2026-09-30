@@ -8,7 +8,7 @@
 
 목표: 렌더거리 16청크에서 60fps로 걷고, 블록을 부수고 놓고, 저장·불러오기가 되며, 싱글도 내장 서버로 도는 엔진.
 
-- [x] **P0-1 빌드 환경, 창 띄우기** — 완료 기준: 빈 창이 60fps로 뜨고 닫힘 (2026-09-30, Linux GCC·Clang 빌드와 Xvfb 스모크 통과)
+- [x] **P0-1 빌드 환경, 창 띄우기** — 완료 기준: 빈 창이 60fps로 뜨고 닫힘 (2026-09-30, Linux GCC·Clang 빌드와 Xvfb 스모크 통과, Windows MSVC 빌드·실행 확인: 120Hz 화면에서 VSync 약 119fps, 창 크기 변경·Esc·X 종료 정상)
   - `vcpkg.json`, `CMakeLists.txt`, `CMakePresets.json`(debug / release), 폴더 뼈대, `app/main.cpp`
   - GLFW 창 + OpenGL 4.5 core 컨텍스트 + glad, VSync, 창 크기 변경 처리
   - Dear ImGui 초기화(빈 디버그 창), Catch2 테스트 하나(`1 + 1 == 2` 수준)로 ctest 연결 확인

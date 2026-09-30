@@ -69,6 +69,10 @@
 
 - `Could not find toolchain file: /scripts/buildsystems/vcpkg.cmake` → `VCPKG_ROOT`가 비어 있다. `setx VCPKG_ROOT C:\dev\vcpkg`를 하고 VS를 다시 연다.
 - 구성이 꼬였다 → 메뉴 **프로젝트 → CMake 캐시 삭제**를 누른 뒤, 다시 **프로젝트 → CMake 캐시 구성**을 누른다. 또는 저장소의 `build` 폴더를 지운다.
+- 구성 중 CMake가 컴파일러 확인 단계에서 `0xC0000409`로 비정상 종료한다 → VS 2022에 포함된 CMake 3.29.5-msvc4에서 실제로 있었던 일이다. 같은 `debug` 프리셋이 CMake 4.4.3으로는 성공했다(2026-09-30, 원인은 확정하지 못함). 해 볼 것:
+  1. 저장소를 영문·공백 없는 경로(예: `C:\dev\aurora`)에 다시 받아 구성해 본다. 한글·공백이 든 경로가 원인일 수 있다.
+  2. Visual Studio Installer에서 VS 2022를 최신으로 업데이트한다(포함된 CMake도 함께 바뀐다).
+  3. 그래도 안 되면 개발자 PowerShell에서 새 CMake로 명령줄 빌드를 한다. vcpkg가 받아 둔 `%VCPKG_ROOT%\downloads\tools\cmake-*\...\bin\cmake.exe`를 써도 된다.
 - `.sln`으로 작업하고 싶다 → 개발자 PowerShell에서 `cmake --preset vs2022`를 실행하고 `build\vs2022\aurora.sln`을 연다. 평소에는 필요 없다.
 
 ## Claude Code로 시작하기 (웹, GitHub 저장소 연결)
