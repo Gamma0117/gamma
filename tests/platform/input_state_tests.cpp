@@ -54,14 +54,18 @@ TEST_CASE("A focus loss waits until it is taken", "[platform][input]")
     CHECK_FALSE(input.takeFocusLost());
 }
 
-TEST_CASE("Losing focus while minimised releases the mouse after restoring", "[platform][input]")
-{
-    // The main loop's order: poll, take a focus loss, and only then skip the rest of the frame (waiting) if the
-    // window is minimised. `duringPoll` and `duringWait` deliver the events GLFW would hand over in each call.
+namespace {
+
+// The main loop's input order on an InputState and a CursorController: poll, take a focus loss, and only then
+// skip the rest of the frame (waiting) if the window is minimised, or else handle clicks. `duringPoll` and
+// `duringWait` deliver the events GLFW would hand over in each call, in order.
+struct LoopModel {
     InputState input;
     CursorController cursor;
-    const auto frame = [&](const std::function<void()>& duringPoll, bool minimised,
-                           const std::function<void()>& duringWait) {
+
+    void frame(const std::function<void()>& duringPoll, bool minimised = false,
+               const std::function<void()>& duringWait = [] {})
+    {
         input.startFrame(); // pollEvents()
         duringPoll();
         if (input.takeFocusLost()) {
@@ -75,20 +79,80 @@ TEST_CASE("Losing focus while minimised releases the mouse after restoring", "[p
         if (input.wasButtonPressed(MouseButton::Left)) {
             cursor.onClick(false);
         }
-    };
-    const auto nothing = [] {};
+    }
 
-    frame([&] { input.onButtonPressed(MouseButton::Left); }, false, nothing);
-    REQUIRE(cursor.captured());
+    void click() { input.onButtonPressed(MouseButton::Left); }
+    void loseFocus() { input.onFocus(false); }
+    void gainFocus() { input.onFocus(true); }
+};
+
+} // namespace
+
+TEST_CASE("Losing focus while minimised releases the mouse after restoring", "[platform][input]")
+{
+    LoopModel loop;
+    loop.frame([&] { loop.click(); });
+    REQUIRE(loop.cursor.captured());
 
     SECTION("Focus lost in the poll that sees the window minimised")
     {
-        frame([&] { input.onFocus(false); }, true, nothing);
+        loop.frame([&] { loop.loseFocus(); }, true);
     }
     SECTION("Focus lost while already waiting minimised")
     {
-        frame(nothing, true, [&] { input.onFocus(false); });
+        loop.frame([] {}, true, [&] { loop.loseFocus(); });
     }
-    frame([&] { input.onFocus(true); }, false, nothing); // Restored, focused again.
-    CHECK_FALSE(cursor.captured());
+    loop.frame([&] { loop.gainFocus(); }); // Restored, focused again.
+    CHECK_FALSE(loop.cursor.captured());
+}
+
+TEST_CASE("A click before a focus loss in the same poll never captures the mouse", "[platform][input]")
+{
+    LoopModel loop;
+    SECTION("Click then focus lost")
+    {
+        loop.frame([&] {
+            loop.click();
+            loop.loseFocus();
+        });
+        CHECK_FALSE(loop.cursor.captured());
+        CHECK_FALSE(loop.input.isFocused());
+    }
+    SECTION("Click then focus lost and regained: the regain does not undo the loss")
+    {
+        loop.frame([&] {
+            loop.click();
+            loop.loseFocus();
+            loop.gainFocus();
+        });
+        CHECK_FALSE(loop.cursor.captured());
+        CHECK(loop.input.isFocused());
+    }
+    SECTION("A click while unfocused does not count")
+    {
+        loop.frame([&] { loop.loseFocus(); });
+        loop.frame([&] { loop.click(); });
+        CHECK_FALSE(loop.cursor.captured());
+    }
+    SECTION("Focus lost and regained and then a new click: captured")
+    {
+        loop.frame([&] {
+            loop.loseFocus();
+            loop.gainFocus();
+            loop.click();
+        });
+        CHECK(loop.cursor.captured());
+    }
+    SECTION("A click with focus: captured (control)")
+    {
+        loop.frame([&] { loop.click(); });
+        CHECK(loop.cursor.captured());
+    }
+
+    // Whatever happened, a later click with focus captures.
+    loop.frame([&] {
+        loop.gainFocus();
+        loop.click();
+    });
+    CHECK(loop.cursor.captured());
 }

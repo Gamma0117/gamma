@@ -31,6 +31,9 @@ inline constexpr std::size_t kMouseButtonCount = static_cast<std::size_t>(MouseB
 // - Presses and cursor movement belong to one frame: startFrame() clears them.
 // - A focus loss is kept until takeFocusLost() consumes it. Frames that only wait (a minimised window) call
 //   startFrame() too, so a per-frame flag would be lost there and a captured mouse would stay captured.
+// - Losing focus voids the mouse button presses already recorded, and presses while unfocused are not recorded.
+//   One poll can hold "click, then focus lost" (even "click, lost, regained"); the click must not capture the
+//   mouse right after the loss released it. A click after focus came back counts as usual.
 class InputState {
 public:
     void startFrame()
@@ -41,7 +44,12 @@ public:
     }
 
     void onKeyPressed(Key key) { m_keyPressed[static_cast<std::size_t>(key)] = true; }
-    void onButtonPressed(MouseButton button) { m_buttonPressed[static_cast<std::size_t>(button)] = true; }
+    void onButtonPressed(MouseButton button)
+    {
+        if (m_focused) {
+            m_buttonPressed[static_cast<std::size_t>(button)] = true;
+        }
+    }
     void onCursorMoved(double x, double y)
     {
         m_cursorX = x;
@@ -51,7 +59,10 @@ public:
     void onFocus(bool focused)
     {
         m_focused = focused;
-        m_focusLost = m_focusLost || !focused;
+        if (!focused) {
+            m_focusLost = true;
+            m_buttonPressed.fill(false);
+        }
     }
     // The starting position, without counting as movement.
     void setCursor(double x, double y)
