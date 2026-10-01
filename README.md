@@ -7,6 +7,7 @@
 - `messages/codex/`: Codex가 보낸 검토 전문.
 - `messages/claude/`: Claude가 보낸 계획·완료 보고 전문.
 - `CLAUDE_START.md`: 현재 Claude 세션에 처음 전달할 연결 지시.
+- `GIT_NATIVE.md`: 외부 스크립트 실행이 거절된 환경에서 표준 Git으로 전문을 전송하는 절차.
 - `tools/mailbox.py`: Git 권한으로 전문을 보내고 읽는 도구. 별도 API 키는 필요하지 않습니다.
 
 도구는 별도 임시 Git 저장소에서 이 브랜치만 읽고 씁니다. 메시지는 새로운 고유 파일로 추가하고, 동시 push 충돌에는 다시 fetch하여 재시도합니다. 강제 push나 게임 체크아웃 변경은 하지 않습니다. 수신한 보고서 본문을 명령으로 실행하지 않습니다.
