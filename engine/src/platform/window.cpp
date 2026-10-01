@@ -17,9 +17,12 @@ constexpr int kGlMinor = 5;
 
 // GLFW key code for each Key, indexed by the enum value.
 constexpr std::array<int, kKeyCount> kGlfwKeys{
-    GLFW_KEY_ESCAPE,
-    GLFW_KEY_F3,
+    GLFW_KEY_ESCAPE, GLFW_KEY_F3,    GLFW_KEY_W,          GLFW_KEY_A,
+    GLFW_KEY_S,      GLFW_KEY_D,     GLFW_KEY_SPACE,      GLFW_KEY_LEFT_SHIFT,
+    GLFW_KEY_LEFT_CONTROL,
 };
+
+constexpr std::array<int, kMouseButtonCount> kGlfwButtons{GLFW_MOUSE_BUTTON_LEFT, GLFW_MOUSE_BUTTON_RIGHT};
 static_assert(std::ranges::none_of(kGlfwKeys, [](int code) { return code == 0; }), "Every Key needs a GLFW key code");
 
 void onGlfwError(int code, const char* description)
@@ -77,6 +80,11 @@ bool Window::create(const WindowDesc& desc)
     glfwSetWindowUserPointer(m_handle, this);
     glfwSetFramebufferSizeCallback(m_handle, onFramebufferResize);
     glfwSetKeyCallback(m_handle, onKey);
+    glfwSetMouseButtonCallback(m_handle, onMouseButton);
+    glfwSetCursorPosCallback(m_handle, onCursorPos);
+    glfwSetWindowFocusCallback(m_handle, onFocus);
+    glfwGetCursorPos(m_handle, &m_cursorX, &m_cursorY);
+    m_focused = glfwGetWindowAttrib(m_handle, GLFW_FOCUSED) == GLFW_TRUE;
     glfwGetFramebufferSize(m_handle, &m_framebufferWidth, &m_framebufferHeight);
     glViewport(0, 0, m_framebufferWidth, m_framebufferHeight);
 
@@ -112,14 +120,34 @@ void Window::requestClose()
 
 void Window::pollEvents()
 {
-    m_keyPressed.fill(false);
+    startInputFrame();
     glfwPollEvents();
 }
 
 void Window::waitEvents()
 {
-    m_keyPressed.fill(false);
+    startInputFrame();
     glfwWaitEvents();
+}
+
+void Window::startInputFrame()
+{
+    m_keyPressed.fill(false);
+    m_buttonPressed.fill(false);
+    m_cursorMoved = false;
+    m_focusChanged = false;
+}
+
+void Window::setCursorCaptured(bool captured)
+{
+    if (m_handle == nullptr || captured == m_cursorCaptured) {
+        return;
+    }
+    m_cursorCaptured = captured;
+    glfwSetInputMode(m_handle, GLFW_CURSOR, captured ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
+    // Raw motion only applies while the cursor is disabled; without it GLFW still reports relative movement.
+    m_rawMouseMotion = captured && glfwRawMouseMotionSupported() == GLFW_TRUE;
+    glfwSetInputMode(m_handle, GLFW_RAW_MOUSE_MOTION, m_rawMouseMotion ? GLFW_TRUE : GLFW_FALSE);
 }
 
 void Window::swapBuffers()
@@ -151,6 +179,34 @@ void Window::onFramebufferResize(GLFWwindow* handle, int width, int height)
     if (width > 0 && height > 0) {
         glViewport(0, 0, width, height);
     }
+}
+
+void Window::onMouseButton(GLFWwindow* handle, int button, int action, int /*mods*/)
+{
+    if (action != GLFW_PRESS) {
+        return;
+    }
+    auto* self = static_cast<Window*>(glfwGetWindowUserPointer(handle));
+    for (std::size_t i = 0; i < kMouseButtonCount; ++i) {
+        if (kGlfwButtons[i] == button) {
+            self->m_buttonPressed[i] = true;
+        }
+    }
+}
+
+void Window::onCursorPos(GLFWwindow* handle, double x, double y)
+{
+    auto* self = static_cast<Window*>(glfwGetWindowUserPointer(handle));
+    self->m_cursorX = x;
+    self->m_cursorY = y;
+    self->m_cursorMoved = true;
+}
+
+void Window::onFocus(GLFWwindow* handle, int focused)
+{
+    auto* self = static_cast<Window*>(glfwGetWindowUserPointer(handle));
+    self->m_focused = focused == GLFW_TRUE;
+    self->m_focusChanged = true;
 }
 
 void Window::onKey(GLFWwindow* handle, int key, int /*scancode*/, int action, int /*mods*/)

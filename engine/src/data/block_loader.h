@@ -5,6 +5,8 @@
 
 #include <cstddef>
 #include <filesystem>
+#include <functional>
+#include <map>
 #include <memory>
 #include <span>
 #include <string>
@@ -25,6 +27,9 @@ struct BlockLoadResult {
     std::shared_ptr<const BlockRegistry> registry;
     std::vector<LoadIssue> issues;
     std::size_t filesRead = 0;
+    // With the registry: the file every texture of the final blocks resolved to, by texture id
+    // ("aurora:block/stone"). Image loading reads exactly these files and never searches the packs again.
+    std::map<std::string, std::filesystem::path, std::less<>> textureFiles;
 };
 
 // Reads every data/<ns>/blocks/*.json of the packs, in the given order (base game first, then mods by name).

@@ -2,6 +2,7 @@
 
 #include "data/block_registry.h"
 #include "world/chunk_generator.h"
+#include "world/chunk_update.h"
 #include "world/coordinates.h"
 
 #include <cstddef>
@@ -11,6 +12,7 @@
 #include <optional>
 #include <thread>
 #include <unordered_map>
+#include <vector>
 
 namespace aurora::core {
 class JobSystem;
@@ -42,6 +44,9 @@ struct WorldStats {
 //   another position, or could not be queued at all (the job system is shutting down) turns the entry into
 //   Failed, with one log line naming the position. Failed positions are not retried until they leave the keep
 //   range (r + 1) and come back.
+// - Each time a position becomes Loaded it gets a new generation number (1, 2, ... for the whole world) and a
+//   Loaded update with a snapshot; removing a Loaded entry adds an Unloaded update with the same number.
+//   Pending and Failed entries were never announced, so removing them adds nothing.
 //
 // The world keeps the registry it was created with; states are checked against it.
 class World {
@@ -63,6 +68,8 @@ public:
 
     // Null unless loaded.
     const Chunk* chunk(ChunkPos pos) const;
+    // The updates since the last call, oldest first.
+    std::vector<ChunkUpdate> takeChunkUpdates();
     WorldStats stats() const;
     const data::BlockRegistry& registry() const { return *m_registry; }
 
@@ -77,6 +84,7 @@ private:
         EntryState state = EntryState::Pending;
         std::future<std::unique_ptr<Chunk>> result; // Pending only.
         std::unique_ptr<Chunk> chunk;               // Loaded only.
+        std::uint64_t generation = 0;               // Loaded only.
     };
 
     void checkOwnerThread() const;
@@ -89,6 +97,8 @@ private:
     core::JobSystem& m_jobs;
     ChunkGenerator m_generator;
     std::unordered_map<ChunkPos, Entry, ChunkPosHash> m_chunks;
+    std::uint64_t m_lastGeneration = 0;
+    std::vector<ChunkUpdate> m_updates;
 };
 
 } // namespace aurora::world

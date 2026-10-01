@@ -18,7 +18,8 @@ namespace aurora::core {
 // Jobs must not touch world data owned by the server thread; they work on copies and hand back new results
 // (through async() futures or a result queue owned by the caller).
 //
-// Jobs run in FIFO order. Priorities (nearest section first) come with meshing in P0-5.
+// Jobs run in FIFO order. Callers that need an order keep their own queue and submit a few jobs at a time
+// (the client's mesh scheduler submits the nearest sections first and caps the jobs in flight).
 //
 // Contract:
 // - If a worker thread cannot be started, the constructor stops and joins the workers already running, then

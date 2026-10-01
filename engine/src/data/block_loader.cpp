@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <format>
 #include <fstream>
 #include <iterator>
@@ -131,8 +132,10 @@ void readLook(const Json& root, BlockDefinition& block, FileIssues& issues)
     }
 }
 
+using TextureFiles = std::map<std::string, fs::path, std::less<>>;
+
 struct TextureLookup {
-    bool found = false;
+    fs::path file;       // The file found; empty if none.
     std::string failure; // Set when a candidate exists but is unusable (permissions, I/O, broken link, a folder).
 };
 
@@ -146,21 +149,22 @@ TextureLookup findTextureFile(std::span<const DataPack> packs, const ResourceId&
         const PathProbe probe = probePath(candidate);
         switch (probe.kind) {
         case PathKind::File:
-            return {true, {}};
+            return {candidate, {}};
         case PathKind::Missing:
             continue; // Try an earlier pack.
         case PathKind::Failed:
-            return {false, std::format("cannot check {}: {}", core::pathToUtf8(candidate), probe.failure)};
+            return {{}, std::format("cannot check {}: {}", core::pathToUtf8(candidate), probe.failure)};
         case PathKind::Directory:
         case PathKind::Other:
-            return {false, std::format("{} is not a regular file", core::pathToUtf8(candidate))};
+            return {{}, std::format("{} is not a regular file", core::pathToUtf8(candidate))};
         }
     }
     return {};
 }
 
+// Records every texture it finds in `textureFiles` (the same id always resolves to the same file).
 void readTextures(const Json& root, std::string_view dataNamespace, std::span<const DataPack> packs,
-                  BlockDefinition& block, FileIssues& issues)
+                  BlockDefinition& block, TextureFiles& textureFiles, FileIssues& issues)
 {
     const Json* textures = findField(root, "textures");
     if (textures == nullptr) {
@@ -242,7 +246,9 @@ void readTextures(const Json& root, std::string_view dataNamespace, std::span<co
         const TextureLookup lookup = findTextureFile(packs, texture);
         if (!lookup.failure.empty()) {
             issues.error(childPointer("/textures", key), lookup.failure);
-        } else if (!lookup.found) {
+        } else if (!lookup.file.empty()) {
+            textureFiles.emplace(texture.str(), lookup.file);
+        } else {
             issues.error(childPointer("/textures", key),
                          std::format("texture {} not found: no data pack has assets/{}/textures/{}.png", texture.str(),
                                      texture.nameSpace(), texture.path()));
@@ -342,7 +348,8 @@ void readStates(const Json& root, BlockDefinition& block, FileIssues& issues)
 
 // Checks one block file and builds its definition; nullopt if the file has any error (all of them reported).
 std::optional<BlockDefinition> readBlock(const Json& root, std::string_view dataNamespace,
-                                         std::span<const DataPack> packs, const DataPack& pack, FileIssues& issues)
+                                         std::span<const DataPack> packs, const DataPack& pack,
+                                         TextureFiles& textureFiles, FileIssues& issues)
 {
     if (!root.is_object()) {
         issues.error({}, std::format("a block file must hold one JSON object, got {}", describe(root)));
@@ -360,7 +367,7 @@ std::optional<BlockDefinition> readBlock(const Json& root, std::string_view data
     readId(root, block, issues);
     readBreaking(root, block, issues);
     readLook(root, block, issues);
-    readTextures(root, dataNamespace, packs, block, issues);
+    readTextures(root, dataNamespace, packs, block, textureFiles, issues);
     readStates(root, block, issues);
     if (issues.hasErrors()) {
         return std::nullopt;
@@ -433,6 +440,7 @@ BlockLoadResult loadBlocks(std::span<const DataPack> packs)
         std::size_t packIndex = 0;
     };
     std::map<std::string, Loaded, std::less<>> finalBlocks; // By id, after replacements.
+    TextureFiles textureFiles;                               // Every texture any block file named.
 
     for (std::size_t packIndex = 0; packIndex < packs.size(); ++packIndex) {
         const DataPack& pack = packs[packIndex];
@@ -480,7 +488,7 @@ BlockLoadResult loadBlocks(std::span<const DataPack> packs)
                 const std::optional<std::string> text = readFile(file, issues);
                 const std::optional<Json> root = text ? parseJson(*text, issues) : std::nullopt;
                 std::optional<BlockDefinition> block =
-                    root ? readBlock(*root, dataNamespace, packs, pack, issues) : std::nullopt;
+                    root ? readBlock(*root, dataNamespace, packs, pack, textureFiles, issues) : std::nullopt;
                 if (!block || issues.hasErrors()) {
                     continue;
                 }
@@ -521,6 +529,19 @@ BlockLoadResult loadBlocks(std::span<const DataPack> packs)
         blocks.push_back(std::move(loaded.definition));
     }
     result.registry = BlockRegistry::create(std::move(blocks), result.issues);
+    if (result.registry) {
+        // Only the textures of the final blocks: a replaced definition's textures are not loaded.
+        for (const BlockDefinition& block : result.registry->blocks()) {
+            for (const ResourceId& texture : block.faceTextures) {
+                if (!texture.empty()) {
+                    result.textureFiles.emplace(texture.str(), textureFiles.at(texture.str()));
+                }
+            }
+            if (!block.emissiveTexture.empty()) {
+                result.textureFiles.emplace(block.emissiveTexture.str(), textureFiles.at(block.emissiveTexture.str()));
+            }
+        }
+    }
     return result;
 }
 

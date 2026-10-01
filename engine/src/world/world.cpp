@@ -75,7 +75,16 @@ void World::ensureLoaded(ChunkPos center, std::int32_t radius)
     assert(radius >= 0);
 
     const std::int64_t keepRadius = static_cast<std::int64_t>(radius) + 1;
-    std::erase_if(m_chunks, [&](const auto& item) { return chunkDistance(item.first, center) > keepRadius; });
+    std::erase_if(m_chunks, [&](const auto& item) {
+        const auto& [pos, entry] = item;
+        if (chunkDistance(pos, center) <= keepRadius) {
+            return false;
+        }
+        if (entry.state == EntryState::Loaded) {
+            m_updates.push_back({ChunkUpdate::Kind::Unloaded, pos, entry.generation, nullptr});
+        }
+        return true;
+    });
 
     for (std::int32_t ring = 0; ring <= radius; ++ring) {
         forEachInRing(center, ring, [this](ChunkPos pos) {
@@ -129,6 +138,12 @@ const Chunk* World::chunk(ChunkPos pos) const
 {
     checkOwnerThread();
     return loadedChunk(pos);
+}
+
+std::vector<ChunkUpdate> World::takeChunkUpdates()
+{
+    checkOwnerThread();
+    return std::exchange(m_updates, {});
 }
 
 WorldStats World::stats() const
@@ -201,6 +216,9 @@ void World::receive(ChunkPos pos, Entry& entry)
     }
     entry.chunk = std::move(chunk);
     entry.state = EntryState::Loaded;
+    entry.generation = ++m_lastGeneration;
+    m_updates.push_back(
+        {ChunkUpdate::Kind::Loaded, pos, entry.generation, ChunkSnapshot::copyOf(*entry.chunk, entry.generation)});
 }
 
 } // namespace aurora::world

@@ -54,22 +54,35 @@
 6. **시작 항목 고르기.** 도구 모음의 초록색 ▶ 버튼 옆 드롭다운("시작 항목 선택")에서 **aurora.exe**를 고른다.
 7. **실행.** `F5`(디버거 연결) 또는 `Ctrl+F5`(디버거 없이 실행).
 8. **보여야 하는 것**
-   - 어두운 남색 배경의 "Aurora" 창(1280×720)이 뜬다. 처음에는 배경만 보인다.
+   - "Aurora" 창(1280×720)이 뜨고, 1초쯤 안에 어두운 남색 하늘 아래 풀이 덮인 평지가 보인다. 카메라는 y 80 높이에서 북쪽을 약간 내려다본다. 그려지는 범위는 카메라 둘레 반경 8청크(17×17)이고, 그 너머는 하늘색이다.
+   - **조작** (P0-5는 자유 비행 카메라)
+     - 창 안의 지형을 **클릭**하면 마우스가 잡힌다(커서가 사라짐). F3 화면 위를 클릭하면 잡히지 않는다.
+     - 마우스로 둘러보고, **W A S D**로 바라보는 방향 기준 수평 이동, **Space**·**Shift**로 위아래로 움직인다. **Ctrl**을 누르고 있으면 4배 빠르다(초당 10블록 → 40블록).
+     - **Esc**를 누르면 마우스가 풀린다. 아직 메뉴·일시정지가 아니라서 서버는 계속 돈다. 창을 다른 곳으로 전환해도 풀린다.
+     - 창을 닫으려면 창의 X 버튼을 누른다. P0-4까지는 Esc로 닫혔지만 이제 Esc는 마우스를 놓는 키다.
+     - 멀리 날아가면 앞쪽에 새 청크가 생기고 지나온 쪽은 내려간다.
    - **F3**을 누르면 왼쪽 위에 반투명 디버그 화면이 뜬다.
      - FPS와 프레임 시간(평균, 최근 240프레임의 최소·최대), CPU 시간, 프레임 시간 그래프. 모니터가 60Hz면 약 60 FPS / 16.7 ms, 120Hz면 약 120 FPS / 8.3 ms
      - `Server 20.0 TPS`와 틱 시간·틱 번호·건너뛴 틱(`skipped 0`). 서버는 렌더와 별도 스레드에서 초당 20틱으로 돈다
-     - `Chunks 289 loaded, 0 pending, 0 failed`: 서버가 원점 둘레(반경 8, 17×17)에 만든 평지 청크 수. 시작 직후에는 `pending`이 잠깐 보이다가 0이 된다. 화면에 그리는 것은 P0-5부터다
+     - `Chunks 361 loaded, 0 pending, 0 failed`: 서버가 카메라 둘레 반경 9(19×19)에 만든 평지 청크 수. 그리는 범위(반경 8)보다 한 칸 넓게 불러와서, 그려지는 청크는 모두 이웃이 있다. 움직이는 동안에는 한 칸 더 유지하기 때문에 361보다 많을 수 있다
+     - `XYZ`, `chunk`, `section`: 카메라 위치와 그 청크·섹션. `Facing north (yaw …, pitch …)`: 바라보는 방향(yaw 0 = 북쪽, 90 = 동쪽)
+     - `Render distance 8: N chunks held, 289 drawable`: 클라이언트가 받은 청크 수와, 그중 그릴 수 있는 청크 수(반경 8 안이고 8방향 이웃이 모두 있음)
+     - `Meshes 289 done, … empty, 0 waiting, 0 in flight, 0 failed`: 섹션 메시 상태. 평지는 청크마다 지표 섹션 하나에 면이 있고, 땅속 섹션은 면이 없어서 `empty`다
+     - `GPU 289 sections, 1156 vertices, … MB, 0 to upload`와 `drawn N sections in N calls`: GPU에 올라간 메시와, 카메라 시야(절두체) 안이라 실제로 그린 섹션 수
+     - 마지막 줄: 마우스가 잡혔는지(`Mouse captured (Esc releases)`) 아닌지
      - `Workers N`: 워커 스레드 수(논리 프로세서 수 − 2, 최소 1)
      - `Blocks 8 (10 states)`: 읽어 들인 블록 수(내장 공기·unknown 포함)와 블록 상태 수
      - 창 크기, VSync 체크박스(끄면 FPS가 크게 오르지만 서버는 20 TPS 그대로), OpenGL 버전(`4.5` 이상, Core Profile), GPU 이름, Tracy 상태
    - F3을 다시 누르면 사라진다. 누르고 있어도 한 번만 바뀐다.
    - 창 가장자리를 끌어 크기를 바꿔도 배경이 늘어나거나 깨지지 않고, 디버그 화면의 창 크기가 바뀐다.
-   - 콘솔에 `Flat world preset: 3 layers, 128 blocks high (top layer ends at y 63)`와, 잠시 뒤 `Spawn area ready after … ms: 289 chunks loaded, 0 failed`가 찍힌다.
-   - **Esc**나 창의 X 버튼으로 닫힌다. 콘솔에 `[INFO ] [app] (Main) N frames, avg … ms/frame`과 `Server thread stopped: … last measured 20.0x TPS` 같은 로그가 찍히고, 마지막 줄은 `Exiting with code 0`이다.
+   - 콘솔에 `Loaded 8 block textures (32x32 PNG)`, `Flat world preset: 3 layers, 128 blocks high (top layer ends at y 63)`와, 잠시 뒤 `Spawn area ready after … ms: 361 chunks loaded, 0 failed`가 찍힌다.
+   - 창의 X 버튼으로 닫으면 콘솔에 `[INFO ] [app] (Main) N frames, avg … ms/frame`과 `Server thread stopped: … last measured 20.0x TPS` 같은 로그가 찍히고, 마지막 줄은 `Exiting with code 0`이다.
 
-### 게임 데이터 (블록 JSON, 평지 프리셋)
+### 게임 데이터 (블록 JSON, 텍스처, 평지 프리셋, 쉐이더)
 
 - 블록 정의는 `game/data/aurora/blocks/*.json`에 있다. 형식은 `docs/15_data_files.md`의 "블록 파일".
+- 블록 텍스처는 `game/assets/aurora/textures/block/*.png`이고 32×32 PNG여야 한다. 창을 띄우기 전에 모두 읽어 검사한다.
+- 청크 쉐이더는 `game/assets/aurora/shaders/chunk.vert`, `chunk.frag`이다(시작할 때 읽는다. 실행 중 다시 읽기는 P0-10).
 - 평지 월드의 층 구성은 `game/data/aurora/worldgen/flat.json`에 있다(돌 124층, 흙 3층, 풀 1층). 형식은 같은 문서의 "평지 프리셋".
 - 게임은 시작할 때 `./game`(실행 폴더), 없으면 저장소의 `game` 폴더를 읽는다. 다른 폴더를 쓰려면 `--game-dir <폴더>`를 준다(VS에서는 `launch.vs.json`의 `args`). 이때는 그 폴더만 쓴다.
 - 파일이 틀리면 로그에 **파일 경로, 필드, 이유**가 줄마다 나오고, 창을 띄우지 않고 종료 코드 1로 끝난다. 예:
@@ -103,7 +116,7 @@
 
 - 메뉴 **테스트 → 테스트 탐색기**를 열고 **모두 실행**을 누른다. `aurora_tests`의 테스트가 모두 초록색이면 된다.
   - 처음 열었을 때 테스트가 0개로 보이면 메뉴 **테스트 → aurora에 대해 CTests 실행**을 한 번 누르거나 검색이 끝나기를 기다린다. 그러면 목록에 나타난다.
-  - Linux 전용 `app_smoke`(Xvfb 창 테스트)는 Windows 목록에 없다.
+  - Linux 전용 `app_smoke`, `app_render_screenshot`, `app_render_screenshot_without_world`(Xvfb 창 테스트)와 링크·권한 테스트는 Windows 목록에 없다.
 - 또는 **보기 → 터미널**(개발자 PowerShell)에서 `ctest --preset debug`를 실행한다.
 - 테스트 하나가 약 0.3초씩 걸린다(Linux 기준). 테스트 프로세스가 끝날 때 Tracy 수신 스레드를 정리하는 시간이다.
 
@@ -112,6 +125,9 @@
 - `Could not find toolchain file: /scripts/buildsystems/vcpkg.cmake` → `VCPKG_ROOT`가 비어 있다. `setx VCPKG_ROOT C:\dev\vcpkg`를 하고 VS를 다시 연다.
 - 창이 뜨지 않고 로그에 `[ERROR] [data]` 줄과 `Block data has N error(s)`가 있다 → 블록 JSON이 틀렸다. 각 줄의 파일과 필드를 고친다. `--game-dir … is not an existing folder`면 지정한 폴더가 없다.
 - 창이 뜨지 않고 로그에 `The flat world preset has N error(s)`가 있다 → `worldgen/flat.json`이 틀렸다. 바로 위 ERROR 줄의 필드(`/layers/0/height` 등)를 고친다.
+- 창이 뜨지 않고 로그에 `Block textures have N error(s)`가 있다 → 블록 텍스처 PNG가 깨졌거나 32×32가 아니다. 바로 위 ERROR 줄에 파일과 이유가 있다.
+- 창은 떴다가 바로 닫히고 로그에 `Cannot set up chunk rendering: …`이 있다 → 쉐이더 파일을 읽지 못했거나 컴파일 오류가 났다(파일과 드라이버 로그가 함께 나온다).
+- 지형이 자홍·검정 체크무늬로 보인다 → 그 면의 텍스처가 텍스처 배열에 없다(unknown 블록 등). 로그의 텍스처 줄을 확인한다.
 - F3에 `failed`가 0이 아니거나 `Server stopped: …`가 보인다 → 청크 생성이나 서버 틱에서 오류가 났다. 로그의 `[ERROR] [world]` 또는 `Server thread stopped by an error` 줄에 좌표와 이유가 있다.
 - 창이 뜨지 않고 로그 끝에 `Fatal start-up error: …`와 `Exiting with code 1`이 있다 → 시작 단계의 치명적 오류(예: 스레드를 만들 수 없음)다. 바로 위 ERROR 줄이 원인이다.
 - CMake 출력에 `Tracy client was built without TRACY_ENABLE` 경고가 나오거나 F3 화면에 `Tracy off`가 보인다 → Tracy가 프로파일링이 꺼진 채로 빌드됐다. **프로젝트 → CMake 캐시 삭제** 후 다시 구성해 vcpkg가 `cmake/triplets` 설정으로 Tracy를 다시 빌드하게 한다.

@@ -13,11 +13,14 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
+#include <vector>
 
 using namespace std::chrono_literals;
 using namespace aurora::world;
@@ -351,4 +354,87 @@ TEST_CASE("A failed chunk is retried only after it leaves the range and comes ba
     CHECK(world.stats().failedChunks == 0);
     CHECK(fixture.probe->callsAt(ChunkPos{1, 0}) == 2);
     CHECK(fixture.probe->callsAt(ChunkPos{0, 1}) == 2);
+}
+
+TEST_CASE("A snapshot copies the chunk and does not follow later changes", "[world][snapshot]")
+{
+    Fixture fixture;
+    JobSystem jobs(1);
+    World world(fixture.registry, jobs, makeFlatGenerator(fixture.preset));
+    world.ensureLoaded(ChunkPos{-2, 3}, 0);
+    finishJobs(jobs, world);
+
+    const std::vector<ChunkUpdate> updates = world.takeChunkUpdates();
+    REQUIRE(updates.size() == 1);
+    REQUIRE(updates[0].snapshot);
+    const ChunkSnapshot& snapshot = *updates[0].snapshot;
+    const Chunk& chunk = *world.chunk(ChunkPos{-2, 3});
+    CHECK(snapshot.pos() == ChunkPos{-2, 3});
+    for (std::int32_t index = 0; index < aurora::core::kSectionsPerChunk; ++index) {
+        INFO("section " << index);
+        CHECK((snapshot.section(index) == nullptr) == (chunk.section(index) == nullptr));
+        CHECK((snapshot.section(index) == nullptr || snapshot.section(index) != chunk.section(index))); // A copy.
+    }
+    for (const std::int32_t y : {-64, 59, 60, 63, 64, 319}) {
+        CHECK(snapshot.getBlock(3, y, 4) == chunk.getBlock(3, y, 4));
+    }
+
+    const BlockStateId log = stateOf(*fixture.registry, "aurora:oak_log");
+    REQUIRE(world.setBlock(BlockPos{-30, 100, 50}, log));
+    REQUIRE(world.setBlock(BlockPos{-30, 63, 50}, aurora::data::kAirState));
+    CHECK(snapshot.getBlock(2, 100, 2) == aurora::data::kAirState);
+    CHECK(snapshot.getBlock(2, 63, 2) == stateOf(*fixture.registry, "aurora:grass_block"));
+    CHECK(world.takeChunkUpdates().empty()); // Block changes are not announced before P0-7.
+}
+
+TEST_CASE("Load updates carry generations and unloads repeat them", "[world][snapshot]")
+{
+    const aurora::test::QuietLog quiet; // One failure is logged on purpose.
+    Fixture fixture;
+    fixture.probe->throwAt = {ChunkPos{1, 1}};
+    JobSystem jobs(2);
+    World world(fixture.registry, jobs, fixture.generator());
+
+    world.ensureLoaded(ChunkPos{0, 0}, 1);
+    finishJobs(jobs, world);
+    const std::vector<ChunkUpdate> loads = world.takeChunkUpdates();
+    REQUIRE(loads.size() == 8); // The failed chunk is not announced.
+    std::unordered_map<ChunkPos, std::uint64_t, ChunkPosHash> generations;
+    for (const ChunkUpdate& update : loads) {
+        CHECK(update.kind == ChunkUpdate::Kind::Loaded);
+        CHECK(update.generation == update.snapshot->generation());
+        CHECK(generations.emplace(update.pos, update.generation).second);
+    }
+    CHECK_FALSE(generations.contains(ChunkPos{1, 1}));
+
+    // A request still pending when it leaves the range was never announced, so it is not unloaded either.
+    fixture.probe->setOpen(false);
+    {
+        std::lock_guard lock(fixture.probe->mutex);
+        fixture.probe->throwAt.clear();
+    }
+    world.ensureLoaded(ChunkPos{0, 3}, 1); // Rows z = 2..4 are new, (x, 3) and (x, 4) pending; z = -1 drops.
+    world.ensureLoaded(ChunkPos{0, 20}, 1);
+    fixture.probe->setOpen(true);
+    finishJobs(jobs, world);
+    std::vector<ChunkUpdate> unloads = world.takeChunkUpdates();
+    std::erase_if(unloads, [](const ChunkUpdate& update) { return update.kind == ChunkUpdate::Kind::Loaded; });
+    REQUIRE(unloads.size() == 8);
+    for (const ChunkUpdate& update : unloads) {
+        CHECK_FALSE(update.snapshot);
+        REQUIRE(generations.contains(update.pos));
+        CHECK(update.generation == generations.at(update.pos));
+    }
+
+    // Coming back loads every position again with new, larger numbers.
+    world.ensureLoaded(ChunkPos{0, 0}, 1);
+    finishJobs(jobs, world);
+    std::vector<ChunkUpdate> reloads = world.takeChunkUpdates();
+    std::erase_if(reloads, [](const ChunkUpdate& update) { return update.kind == ChunkUpdate::Kind::Unloaded; });
+    CHECK(reloads.size() == 9);
+    for (const ChunkUpdate& update : reloads) {
+        if (generations.contains(update.pos)) {
+            CHECK(update.generation > generations.at(update.pos));
+        }
+    }
 }

@@ -8,14 +8,18 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <functional>
+#include <iterator>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <thread>
+#include <vector>
 
 using namespace std::chrono_literals;
 using aurora::server::IntegratedServer;
@@ -224,7 +228,7 @@ TEST_CASE("An exception in a tick stops the server thread and is reported", "[se
     CHECK(server.stats().error == "tick hook failure");
 }
 
-TEST_CASE("The server generates the spawn area on the job system", "[server]")
+TEST_CASE("The server generates the area around the view center on the job system", "[server]")
 {
     const auto registry = aurora::test::makeTestRegistry();
     aurora::core::JobSystem jobs(2);
@@ -234,14 +238,82 @@ TEST_CASE("The server generates the spawn area on the job system", "[server]")
 
     REQUIRE(server.start());
     CHECK(server.stats().hasWorld);
+    // The default radius is 9: 19 x 19 chunks.
     REQUIRE(waitForStats(server, [](const ServerStats& stats) {
-        return stats.loadedChunks + stats.failedChunks == 289 && stats.pendingChunks == 0;
+        return stats.loadedChunks + stats.failedChunks == 361 && stats.pendingChunks == 0;
     }));
     const ServerStats stats = server.stats();
-    CHECK(stats.loadedChunks == 289);
+    CHECK(stats.loadedChunks == 361);
     CHECK(stats.failedChunks == 0);
     server.stop();
-    CHECK(server.stats().loadedChunks == 289); // The last snapshot stays readable.
+    CHECK(server.stats().loadedChunks == 361); // The last snapshot stays readable.
+}
+
+TEST_CASE("Chunk updates follow the view center in order", "[server]")
+{
+    using aurora::world::ChunkPos;
+    using aurora::world::ChunkUpdate;
+    const auto registry = aurora::test::makeTestRegistry();
+    aurora::core::JobSystem jobs(2);
+    IntegratedServer server(ServerConfig{.jobs = &jobs,
+                                         .blocks = registry,
+                                         .flatPreset = aurora::test::makeStandardFlatPreset(*registry),
+                                         .loadRadius = 1});
+    REQUIRE(server.start());
+
+    // Collects updates until `done` holds for everything collected so far (10 s hang guard).
+    std::vector<ChunkUpdate> updates;
+    const auto collectUntil = [&](const std::function<bool()>& done) {
+        const Clock::time_point deadline = Clock::now() + 10s;
+        while (!done() && Clock::now() < deadline) {
+            std::vector<ChunkUpdate> more = server.takeChunkUpdates();
+            updates.insert(updates.end(), std::make_move_iterator(more.begin()), std::make_move_iterator(more.end()));
+            std::this_thread::sleep_for(1ms);
+        }
+        return done();
+    };
+    const auto count = [&](ChunkUpdate::Kind kind) {
+        return std::count_if(updates.begin(), updates.end(), [&](const ChunkUpdate& u) { return u.kind == kind; });
+    };
+
+    REQUIRE(collectUntil([&] { return count(ChunkUpdate::Kind::Loaded) == 9; }));
+    for (const ChunkUpdate& update : updates) {
+        REQUIRE(update.snapshot);
+        CHECK(update.snapshot->pos() == update.pos);
+        CHECK(update.snapshot->generation() == update.generation);
+        CHECK(update.snapshot->getBlock(0, 63, 0) == aurora::test::stateOf(*registry, "aurora:grass_block"));
+    }
+    const std::uint64_t originGeneration =
+        std::find_if(updates.begin(), updates.end(), [](const ChunkUpdate& u) { return u.pos == ChunkPos{0, 0}; })
+            ->generation;
+
+    // Far away: the nine old chunks are announced as unloaded (keep radius 2 is exceeded), nine new ones loaded.
+    server.setViewCenter(ChunkPos{10, 0});
+    REQUIRE(collectUntil([&] { return count(ChunkUpdate::Kind::Loaded) == 18; }));
+    CHECK(count(ChunkUpdate::Kind::Unloaded) == 9);
+    // Indices, not iterators: collecting more updates may reallocate the vector.
+    const auto indexOf = [&](ChunkUpdate::Kind kind, bool last) {
+        std::optional<std::size_t> found;
+        for (std::size_t i = 0; i < updates.size(); ++i) {
+            if (updates[i].kind == kind && updates[i].pos == ChunkPos{0, 0} && (last || !found)) {
+                found = i;
+            }
+        }
+        return found;
+    };
+    const std::optional<std::size_t> unloadOrigin = indexOf(ChunkUpdate::Kind::Unloaded, false);
+    REQUIRE(unloadOrigin);
+    CHECK(updates[*unloadOrigin].generation == originGeneration);
+    CHECK_FALSE(updates[*unloadOrigin].snapshot);
+
+    // Back again: the origin loads anew with a larger generation, after its unload.
+    server.setViewCenter(ChunkPos{0, 0});
+    REQUIRE(collectUntil([&] { return count(ChunkUpdate::Kind::Loaded) == 27; }));
+    const std::optional<std::size_t> reload = indexOf(ChunkUpdate::Kind::Loaded, true);
+    REQUIRE(reload);
+    CHECK(updates[*reload].generation > originGeneration);
+    CHECK(*reload > *unloadOrigin);
+    server.stop();
 }
 
 TEST_CASE("A server whose jobs are refused still runs and stops", "[server]")

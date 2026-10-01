@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <exception>
+#include <iterator>
 #include <string>
 #include <utility>
 
@@ -23,9 +24,6 @@ using Clock = ServerTestHooks::Clock;
 
 // Tick-time statistics cover the last 5 seconds.
 constexpr std::size_t kTickHistory = core::kTicksPerSecond * 5;
-
-// The chunk the loaded area is centred on until players exist (P0-5).
-constexpr world::ChunkPos kSpawnChunk{0, 0};
 
 float toMilliseconds(Clock::duration duration)
 {
@@ -47,6 +45,7 @@ IntegratedServer::IntegratedServer()
 IntegratedServer::IntegratedServer(ServerConfig config, ServerTestHooks hooks)
     : m_config(std::move(config))
     , m_hooks(std::move(hooks))
+    , m_viewCenter(m_config.viewCenter)
 {
     const bool partial = m_config.jobs || m_config.blocks || m_config.flatPreset;
     if (partial && !hasWorldConfig(m_config)) {
@@ -72,6 +71,7 @@ bool IntegratedServer::start()
         m_stats = ServerStats{};
         m_stats.running = true;
         m_stats.hasWorld = hasWorldConfig(m_config);
+        m_chunkUpdates.clear();
     }
     try {
         m_thread = std::thread(&IntegratedServer::run, this);
@@ -110,6 +110,18 @@ ServerStats IntegratedServer::stats() const
     return m_stats;
 }
 
+void IntegratedServer::setViewCenter(world::ChunkPos center)
+{
+    std::lock_guard lock(m_mutex);
+    m_viewCenter = center;
+}
+
+std::vector<world::ChunkUpdate> IntegratedServer::takeChunkUpdates()
+{
+    std::lock_guard lock(m_mutex);
+    return std::exchange(m_chunkUpdates, {});
+}
+
 void IntegratedServer::run()
 {
     core::setCurrentThreadName("Server");
@@ -141,7 +153,7 @@ void IntegratedServer::runLoop()
         world = std::make_unique<world::World>(m_config.blocks, *m_config.jobs,
                                                world::makeFlatGenerator(m_config.flatPreset));
         const std::int64_t side = 2 * static_cast<std::int64_t>(loadRadius) + 1;
-        core::logInfo("server", "Flat world: loading {} chunks around the origin (radius {})", side * side,
+        core::logInfo("server", "Flat world: loading {} chunks around the view center (radius {})", side * side,
                       loadRadius);
     }
 
@@ -241,8 +253,19 @@ void IntegratedServer::tick(std::uint64_t tickNumber, world::World* world)
         m_hooks.onTick(tickNumber);
     }
     if (world) {
-        world->ensureLoaded(kSpawnChunk, std::max(0, m_config.loadRadius));
+        world::ChunkPos center;
+        {
+            std::lock_guard lock(m_mutex);
+            center = m_viewCenter;
+        }
+        world->ensureLoaded(center, std::max(0, m_config.loadRadius));
         world->update();
+        std::vector<world::ChunkUpdate> updates = world->takeChunkUpdates();
+        if (!updates.empty()) {
+            std::lock_guard lock(m_mutex);
+            m_chunkUpdates.insert(m_chunkUpdates.end(), std::make_move_iterator(updates.begin()),
+                                  std::make_move_iterator(updates.end()));
+        }
     }
 }
 

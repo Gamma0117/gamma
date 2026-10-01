@@ -1,5 +1,6 @@
 # One library per module. Link direction enforces the dependency order:
 # core <- platform <- data <- world <- entity <- (server | client) <- render <- ui
+# render is split in two: aurora_render_mesh (CPU meshing, no GL; client <- render_mesh) and aurora_render (GL).
 
 find_package(Threads REQUIRED)
 find_package(Tracy CONFIG REQUIRED)
@@ -7,6 +8,8 @@ find_package(glfw3 CONFIG REQUIRED)
 find_package(glad CONFIG REQUIRED)
 find_package(imgui CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
+find_package(glm CONFIG REQUIRED)
+find_package(Stb REQUIRED)
 
 # The overlay triplets build Tracy with TRACY_ENABLE; without it every profiler macro compiles to nothing.
 get_target_property(AURORA_TRACY_DEFINITIONS Tracy::TracyClient INTERFACE_COMPILE_DEFINITIONS)
@@ -42,10 +45,12 @@ target_link_libraries(aurora_platform
 )
 aurora_set_warnings(aurora_platform)
 
-# data: game content loaded from game/data JSON (block registry). JSON stays out of the public headers.
+# data: game content loaded from game/data JSON (block registry) and block texture images (decoded on the CPU,
+# before any window exists). JSON and stb stay out of the public headers.
 add_library(aurora_data STATIC
     src/data/block_loader.cpp
     src/data/block_registry.cpp
+    src/data/block_textures.cpp
     src/data/flat_preset.cpp
     src/data/game_directory.cpp
     src/data/json_support.cpp
@@ -58,18 +63,34 @@ target_link_libraries(aurora_data
     PUBLIC aurora::core
     PRIVATE nlohmann_json::nlohmann_json
 )
+# SYSTEM: the single-header library is not held to our warning flags.
+target_include_directories(aurora_data SYSTEM PRIVATE "${Stb_INCLUDE_DIR}")
 aurora_set_warnings(aurora_data)
 
 # world: chunks, sections, the chunk table and world generation. Plain data plus jobs; no rendering.
 add_library(aurora_world STATIC
     src/world/chunk.cpp
     src/world/chunk_section.cpp
+    src/world/chunk_snapshot.cpp
     src/world/flat_generator.cpp
     src/world/world.cpp
 )
 add_library(aurora::world ALIAS aurora_world)
 target_link_libraries(aurora_world PUBLIC aurora::data)
 aurora_set_warnings(aurora_world)
+
+# client: the client's copy of the world (snapshots from the server), what to mesh and when, the camera and who
+# owns the mouse. CPU only: no window or GL here, so all of it is tested without a context.
+add_library(aurora_client STATIC
+    src/client/camera.cpp
+    src/client/client_world.cpp
+    src/client/cursor_controller.cpp
+    src/client/frustum.cpp
+    src/client/mesh_scheduler.cpp
+)
+add_library(aurora::client ALIAS aurora_client)
+target_link_libraries(aurora_client PUBLIC aurora::world glm::glm)
+aurora_set_warnings(aurora_client)
 
 # server: authoritative simulation on its own fixed-rate thread. Knows nothing about render or ui.
 add_library(aurora_server STATIC
@@ -79,15 +100,32 @@ add_library(aurora::server ALIAS aurora_server)
 target_link_libraries(aurora_server PUBLIC aurora::world)
 aurora_set_warnings(aurora_server)
 
+# render_mesh: the CPU half of rendering. Turns sections into vertex data on worker threads; no GL, so it is tested
+# without a context. The client's mesh scheduler calls it through an injected function (client <- render_mesh).
+add_library(aurora_render_mesh STATIC
+    src/render/chunk_mesher.cpp
+    src/render/mesh_resources.cpp
+    src/render/mesh_vertex.cpp
+    src/render/upload_queue.cpp
+)
+add_library(aurora::render_mesh ALIAS aurora_render_mesh)
+target_link_libraries(aurora_render_mesh PUBLIC aurora::client)
+aurora_set_warnings(aurora_render_mesh)
+
 # render: OpenGL state and draw commands.
 add_library(aurora_render STATIC
+    src/render/chunk_renderer.cpp
     src/render/renderer.cpp
+    src/render/screenshot.cpp
+    src/render/shader.cpp
+    src/render/texture_array.cpp
 )
 add_library(aurora::render ALIAS aurora_render)
 target_link_libraries(aurora_render
-    PUBLIC aurora::platform
+    PUBLIC aurora::platform aurora::render_mesh
     PRIVATE glad::glad
 )
+target_include_directories(aurora_render SYSTEM PRIVATE "${Stb_INCLUDE_DIR}")
 aurora_set_warnings(aurora_render)
 
 # ui: Dear ImGui debug layer and the F3 overlay (reads server stats for display).

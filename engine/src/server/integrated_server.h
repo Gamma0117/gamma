@@ -1,6 +1,8 @@
 #pragma once
 
 #include "server/server_stats.h"
+#include "world/chunk_update.h"
+#include "world/coordinates.h"
 
 #include <chrono>
 #include <condition_variable>
@@ -9,6 +11,7 @@
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <vector>
 
 namespace aurora::core {
 class JobSystem;
@@ -31,9 +34,11 @@ struct ServerConfig {
     core::JobSystem* jobs = nullptr;
     std::shared_ptr<const data::BlockRegistry> blocks;
     std::shared_ptr<const data::FlatPreset> flatPreset;
-    // Chunks kept loaded around the origin, as a square radius: 8 is 17 x 17 = 289 chunks. From P0-5 on the
-    // center follows the player.
-    std::int32_t loadRadius = 8;
+    // Chunks loaded around the view center (setViewCenter), as a square radius: 9 is 19 x 19 = 361 chunks, one
+    // ring more than a render distance of 8 so every drawn chunk has its neighbours. Entries stay one ring further
+    // (World keeps radius + 1), so while the center moves more than that can be loaded.
+    std::int32_t loadRadius = 9;
+    world::ChunkPos viewCenter{};
 };
 
 // Test seams. Both run on the server thread only.
@@ -54,7 +59,9 @@ struct ServerTestHooks {
 // server through packets (P0-11).
 //
 // The World is created at the start of the server thread and destroyed before it ends, so the server thread is
-// its owner: only it reads or writes world data. Other threads see stats() snapshots.
+// its owner: only it reads or writes world data. Other threads see stats() and the chunk updates: immutable
+// snapshots of loaded chunks and notices of unloaded ones, in the order they happened (takeChunkUpdates()). Until
+// packets exist (P0-11) this in-memory mailbox is the client's only way to the world.
 //
 // Errors: an exception anywhere in the loop (world creation, a tick) is caught at the top of the thread, logged
 // and put in ServerStats::error; the thread ends and stop() joins it as usual.
@@ -80,6 +87,11 @@ public:
     // Thread-safe snapshot.
     ServerStats stats() const;
 
+    // Where the client is looking from; the next tick loads around it. Thread-safe; the latest call wins.
+    void setViewCenter(world::ChunkPos center);
+    // Every chunk update since the last call, oldest first. Thread-safe. Restarting the server clears them.
+    std::vector<world::ChunkUpdate> takeChunkUpdates();
+
 private:
     void run();
     void runLoop();
@@ -94,6 +106,8 @@ private:
     std::condition_variable m_wake;
     bool m_stopRequested = false;
     ServerStats m_stats;
+    world::ChunkPos m_viewCenter;
+    std::vector<world::ChunkUpdate> m_chunkUpdates;
 };
 
 } // namespace aurora::server

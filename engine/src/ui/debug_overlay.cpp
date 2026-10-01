@@ -1,5 +1,6 @@
 #include "ui/debug_overlay.h"
 
+#include "client/camera.h"
 #include "core/profiler.h"
 #include "core/timing_history.h"
 #include "platform/window.h"
@@ -67,6 +68,29 @@ void drawServerSection(const DebugOverlayData& data)
     }
 }
 
+void drawWorldSection(const DebugOverlayData& data)
+{
+    if (data.camera == nullptr) {
+        return;
+    }
+    const client::Camera& camera = *data.camera;
+    const world::ChunkPos chunk = camera.chunk();
+    ImGui::Text("XYZ %.3f / %.3f / %.3f", camera.position().x, camera.position().y, camera.position().z);
+    ImGui::Text("  chunk %d, %d  section %d", chunk.x, chunk.z, camera.sectionY());
+    ImGui::Text("Facing %s (yaw %.1f, pitch %.1f)", camera.facing(), camera.yaw(), camera.pitch());
+    ImGui::Text("Render distance %d: %zu chunks held, %zu drawable", data.renderDistance, data.chunksHeld,
+                data.chunksDrawable);
+    const client::MeshSchedulerStats& meshes = data.meshes;
+    ImGui::Text("Meshes %zu done, %zu empty, %zu waiting, %zu in flight, %zu failed", meshes.meshed, meshes.empty,
+                meshes.waiting, meshes.inFlight, meshes.failed);
+    const render::ChunkRenderStats& gpu = data.gpu;
+    ImGui::Text("GPU %zu sections, %zu vertices, %.2f MB, %zu to upload", gpu.sections, gpu.vertices,
+                static_cast<double>(gpu.gpuBytes) / (1024.0 * 1024.0), gpu.pendingUploads);
+    ImGui::Text("  drawn %zu sections in %zu calls", gpu.drawnSections, gpu.drawCalls);
+    ImGui::TextDisabled("%s", data.cursorCaptured ? "Mouse captured (Esc releases)"
+                                                  : "Click the world to capture the mouse");
+}
+
 void drawSystemSection(platform::Window& window, const render::Renderer& renderer)
 {
     ImGui::Text("Window %d x %d", window.framebufferWidth(), window.framebufferHeight());
@@ -110,6 +134,8 @@ void DebugOverlay::draw(platform::Window& window, const render::Renderer& render
         drawServerSection(data);
         ImGui::Text("Workers %zu (pending jobs %zu)", data.workerCount, data.pendingJobs);
         ImGui::Text("Blocks %zu (%u states)", data.blockCount, static_cast<unsigned>(data.blockStateCount));
+        ImGui::Separator();
+        drawWorldSection(data);
         ImGui::Separator();
         drawSystemSection(window, renderer);
         ImGui::TextDisabled("F3: hide");

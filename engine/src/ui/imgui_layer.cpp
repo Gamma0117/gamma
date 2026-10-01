@@ -67,6 +67,29 @@ void ImGuiLayer::beginFrame()
     ImGui::NewFrame();
 }
 
+bool ImGuiLayer::wantsMouse() const
+{
+    return m_initialized && ImGui::GetIO().WantCaptureMouse;
+}
+
+bool ImGuiLayer::wantsKeyboard() const
+{
+    return m_initialized && ImGui::GetIO().WantCaptureKeyboard;
+}
+
+void ImGuiLayer::setMouseEnabled(bool enabled)
+{
+    if (!m_initialized) {
+        return;
+    }
+    ImGuiIO& io = ImGui::GetIO();
+    if (enabled) {
+        io.ConfigFlags &= ~ImGuiConfigFlags_NoMouse;
+    } else {
+        io.ConfigFlags |= ImGuiConfigFlags_NoMouse;
+    }
+}
+
 void ImGuiLayer::endFrame()
 {
     AURORA_PROFILE_ZONE_N("ImGui render");
