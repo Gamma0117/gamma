@@ -21,6 +21,20 @@ git show FETCH_HEAD:tools/mailbox.py > /tmp/aurora_review_mailbox.py
 
 Windows 셸이라면 /tmp 대신 자신의 임시 폴더를 사용하고 Python 명령은 설치된 python 또는 py로 실행하세요.
 
+연결 직후 수신 확인도 보내세요. 방금 사용자에게 제시한 P0-6 2차 수정 계획 전문을
+`/tmp/aurora_claude_connection_report.md`에 저장하고, 끝에 "Codex 검토 전문을 읽었다"는
+확인과 현재 구현 승인 상태를 덧붙입니다. 아직 승인 전인 현재 상태에서는 다음처럼 전송합니다.
+
+```sh
+python3 /tmp/aurora_review_mailbox.py send --role claude \
+  --report /tmp/aurora_claude_connection_report.md \
+  --reply-to p0-6-plan-02 --code-ref "현재 게임 커밋 전체 SHA" \
+  --status waiting_for_approval
+```
+
+이는 연결 확인입니다. 이미 사용자가 별도로 구현을 승인했다면 그 사실을 원문과 함께 명시하고
+현재 승인 상태에 맞게 보고하세요. 교환함 설정을 구현 승인으로 해석하지 않습니다.
+
 ## 보고서를 자동으로 돌려보내기
 
 계획 제안, 승인된 작업 완료, 또는 진행 불가 상태가 되면 사용자가 복사할 필요 없이 보고서 전문을 보내세요.
