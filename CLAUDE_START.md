@@ -1,75 +1,49 @@
-# 현재 Claude Code 세션 연결 지시
+# 현재 Claude Code 세션 연결
 
-사용자는 Claude Code가 구현하고 Codex가 기술 검토하는 역할을 정했습니다. 사용자가 지금까지 수동으로 복사한 계획·완료 보고를 두 도구가 직접 교환하도록 요청했습니다. 이 문서는 그 전달 절차입니다. 게임 구현 승인을 추가로 부여하는 문서는 아닙니다.
+사용자는 Claude Code가 게임을 구현하고 Codex가 계획·코드·버그를 검토하는 역할을 정했습니다.
+보고서 전달도 수동 복사 없이 처리하라고 요청했습니다. 현재 자동 진행 범위는 **P0-6 구현,
+테스트, 검토 지적 수정**입니다. 다음 단계는 이 범위에 포함하지 않습니다.
 
-자동 권한 검사가 외부 Python 실행을 거절했다면 실행 허가를 반복 요청하거나 코드를 다른 실행기로
-감싸지 마세요. `GIT_NATIVE.md` 전문을 읽고 표준 Git과 파일 편집으로 보고서를 전송합니다.
-별도 브랜치 push에 대한 명시 허용은 현재 사용자에게 받은 범위대로 판단합니다.
+## 먼저 읽을 것
 
-## 지금 읽을 것
-
-`codex/review-mailbox` 브랜치의 `reports/p0-6/second_revision_review.md` 전문을 읽고 반영하세요. P0-6 2차 수정 계획은 기술 검토 통과입니다. 아래 두 구현 조건도 포함합니다.
-
-1. neutralizedThrough = max(기존 값, through). 작은 Neutralize로 이전 범위를 줄이지 않습니다.
-2. 기록이 비고 lastInput == lastSentSeq이면 정상 완료입니다. 빈 기록 자체로 resync하지 않습니다.
-
-관련 모델과 이전 검토 기록은 `reports/p0-6/`에 있습니다. 사용자의 구현 승인은 별도이며, 이미 승인된 범위만 진행합니다.
-
-현재 게임 작업 트리에서 다른 브랜치로 checkout하지 말고 읽으세요.
+게임 작업 트리의 브랜치를 checkout하지 말고 교환함을 fetch하여 최신 Codex 회신을 읽습니다.
+현재 연결 회신은 다음입니다. 이후 Windows 알림이 새 ID를 알려주면 그 ID의 전문을 읽습니다.
 
 ```sh
 git fetch origin codex/review-mailbox
+git show FETCH_HEAD:messages/codex/20261001T060024456640Z_7fd5b8028baa.md
 git show FETCH_HEAD:reports/p0-6/second_revision_review.md
-git show FETCH_HEAD:tools/mailbox.py > /tmp/aurora_review_mailbox.py
+git show FETCH_HEAD:GIT_NATIVE.md
 ```
 
-Windows 셸이라면 /tmp 대신 자신의 임시 폴더를 사용하고 Python 명령은 설치된 python 또는 py로 실행하세요.
+P0-6 통합 계획의 기술 검토는 통과했습니다. 최신 회신에 사용자 자동 진행 요청 원문과 그 범위를
+P0-6로 한정한 해석이 있습니다. 계획의 네 구현 조건과 회신의 두 추가 주의 사항을 반영하세요.
+교환함을 연결했다는 사실을 새 단계의 승인으로 취급하지 않습니다.
 
-연결 직후 수신 확인도 보내세요. 방금 사용자에게 제시한 P0-6 2차 수정 계획 전문을
-`/tmp/aurora_claude_connection_report.md`에 저장하고, 끝에 "Codex 검토 전문을 읽었다"는
-확인과 현재 구현 승인 상태를 덧붙입니다. 아직 승인 전인 현재 상태에서는 다음처럼 전송합니다.
+## 구현과 보고
 
-```sh
-python3 /tmp/aurora_review_mailbox.py send --role claude \
-  --report /tmp/aurora_claude_connection_report.md \
-  --reply-to p0-6-plan-02 --code-ref "현재 게임 커밋 전체 SHA" \
-  --status waiting_for_approval
-```
+1. 현재 P0-6 계획대로 구현·테스트하고 일상적인 버그 수정과 검토 지적 수정을 이어갑니다.
+2. 사용자에게 쓰는 진행 설명과 최종 보고 전문을 Markdown에 순서대로 보존합니다. 실제 게임
+   브랜치·전체 커밋 SHA, 변경, 발견한 버그, 계획 차이, 수행한 검증과 실패·SKIP·미실행 항목,
+   Windows 확인 사항을 포함합니다. 요약만 전송하거나 미실행 검증을 통과로 기록하지 않습니다.
+3. `GIT_NATIVE.md`의 별도 임시 저장소에서 새로운 고유 ID의 `.md`와 `.json`만 추가하고
+   `codex/review-mailbox`에 일반 push합니다. 보고서 전송에는 게임 작업 트리 변경이나
+   외부 Python 실행이 필요하지 않습니다. 거절된 코드를 다른 실행기로 감싸지 않습니다.
+4. 새 JSON의 reply_to는 읽은 Codex 메시지 ID, code_ref는 실제 구현 커밋 전체 SHA,
+   work_scope는 `P0-6`, stage는 `implementation`, status는 `completed`, stop_cycle은
+   `false`, needs_user는 `false`로 씁니다. 실제 상태가 다르면 status와 needs_user를 맞춥니다.
+5. 전송한 ID와 교환함 커밋을 사용자에게 알립니다. Windows 중계가 실행 중이면 Codex가 그
+   보고서를 읽도록 입력 알림을 보냅니다. Codex의 회신 알림이 오면 전문을 읽고 수정합니다.
 
-이는 연결 확인입니다. 이미 사용자가 별도로 구현을 승인했다면 그 사실을 원문과 함께 명시하고
-현재 승인 상태에 맞게 보고하세요. 교환함 설정을 구현 승인으로 해석하지 않습니다.
+## 멈추는 조건
 
-## 보고서를 자동으로 돌려보내기
+- 실제 사용자 판단이나 권한 차단 때문에 진행할 수 없는 경우는 blocked 또는
+  waiting_for_approval와 needs_user `true`로 전문을 보냅니다. 승인 여부를 대신 결정하지 않습니다.
+- Codex의 **최종 구현** technical_pass, stage `implementation`, stop_cycle `true`를
+  받으면 사용자에게 P0-6 완료를 알리고 종료합니다. 같은 통과를 재검토받는 보고서를 보내거나
+  P0-7을 시작하지 않습니다.
+- 같은 메시지 ID를 이미 처리했다면 반복 작업이나 새 수신 확인 회신을 만들지 않습니다.
+- 앱 자체의 권한 차단은 중계 프로그램이 승인하지 않습니다.
 
-계획 제안, 승인된 작업 완료, 또는 진행 불가 상태가 되면 사용자가 복사할 필요 없이 보고서 전문을 보내세요.
-
-- 지금부터 진행 중 작성하는 설명은 임시 Markdown 파일에 순서대로 보존합니다. 최종 완료 보고 전문도 덧붙입니다. 짧은 요약만 보내지 않습니다.
-- 구현 커밋 전체 SHA와 브랜치, 수정 내용, 발견·수정한 버그, 계획과 달라진 점, 실제 수행한 검증과 실패·SKIP·미실행 항목, Windows 확인 사항을 포함합니다.
-- 검증했다고 쓰는 항목은 실제 수행 결과여야 합니다. 아직 하지 않은 항목을 통과로 적지 않습니다.
-- 승인 전이면 waiting_for_approval, 승인된 작업 완료면 completed, 외부 제한으로 멈췄으면 blocked 상태로 보냅니다.
-
-```sh
-python3 /tmp/aurora_review_mailbox.py poll --role codex
-python3 /tmp/aurora_review_mailbox.py send --role claude \
-  --report /tmp/aurora_claude_full_report.md \
-  --reply-to "위 poll에서 읽은 Codex 메시지 id" \
-  --code-ref "검토할 게임 커밋 전체 SHA" \
-  --status completed
-```
-
-기본 GitHub 주소로 push할 수 없으면 도구 앞에 `--repo`를 붙여 현재 게임 저장소의 origin 주소를 사용하세요. 인증 값은 보고서에 쓰지 않습니다. 도구는 별도 임시 저장소에서 보고서를 전송하므로 게임 작업 트리 변경과 커밋에 섞이지 않습니다.
-
-전송 성공 뒤 응답의 id와 commit을 기록하고 사용자에게 "전체 보고서를 검토 교환함에 전송했다"고 알리세요. 승인 상태라면 새 구현을 시작하지 않고 기다립니다.
-
-## Codex 피드백 읽기
-
-양쪽이 실행 중이면 아래 poll을 통해 회신을 읽습니다. 한 호출의 대기는 최대 50초입니다.
-
-```sh
-python3 /tmp/aurora_review_mailbox.py poll --role codex \
-  --after-id "마지막으로 읽은 Codex 메시지 id" --wait 50
-```
-
-waiting은 아직 회신이 없다는 뜻입니다. 실패나 승인으로 취급하지 않습니다. 에이전트가 종료되면 Git 보고서는 보관되지만 이 도구가 종료된 Codex 대화를 자동 재개할 수는 없습니다.
-
-새 작업을 이어갈 때 먼저 교환함의 최신 Codex 보고서를 읽고, 완료 보고를 같은 절차로 보내세요. 원래 사용자 승인 범위를 넓히지 않습니다.
+Windows 중계가 실행 중이지 않으면 Git 보고서는 보관되지만 종료된 대화가 스스로 재개되지는
+않습니다. 이 경우 다음 실행 때 최신 회신부터 읽습니다.

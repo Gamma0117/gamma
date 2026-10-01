@@ -9,7 +9,31 @@ Claude 환경에서 별도 브랜치 push에 사용자 명시 승인이 필요�
 일반 Git push. 사용자는 현재 Codex 대화에서 자동 보고서 전달을 요청했지만, 다른 Claude 세션의
 검사기는 그 원문을 보지 못하므로 Claude 대화에 이 허용 범위를 직접 전달하면 됩니다.
 
-## 현재 준비된 P0-6 통합 계획
+## Windows 중계에 필요한 새 보고서 필드
+
+새 보고서를 보낼 때 아래 필드를 기존 JSON에 더합니다. 기존 파일은 수정하지 않습니다.
+현재 사용자 요청 범위와 구현 조건은 최신 Codex 메시지 전문을 읽습니다. 이 전송 절차 자체가
+다음 작업의 승인을 추가하지는 않습니다.
+
+```json
+{
+  "work_scope": "P0-6",
+  "stage": "implementation",
+  "stop_cycle": false,
+  "needs_user": false
+}
+```
+
+계획 보고서는 stage를 `plan`으로 씁니다. 실제 사용자 판단·권한 차단 때문에 의존 작업을
+중단해야 하면 needs_user를 `true`로 씁니다. Codex만 최종 P0-6 **구현** 검토 통과에
+status `technical_pass`, stage `implementation`, stop_cycle `true`를 사용합니다.
+이때 Windows 중계가 Claude에 최종 통과를 전달한 뒤 종료합니다. 계획 통과로 종료하지 않습니다.
+Claude는 같은 완료를 다시 검토받는 보고서를 보내지 않습니다.
+
+아래 기존 통합 계획 전송 예시는 초기 연결 때의 승인 대기 기록입니다. 이후 새 보고서는 고유 ID와
+현재 작업 상태를 사용합니다. [Windows 중계 안내](windows-relay/README_KO.md)에 실행 절차가 있습니다.
+
+## 초기 연결 때 보낸 P0-6 통합 계획
 
 1. 별도 임시 폴더에 교환함만 가져옵니다. 게임 작업 트리를 checkout하거나 수정하지 않습니다.
 
@@ -22,7 +46,7 @@ git clone --single-branch --branch codex/review-mailbox \
 있으면 새 이름을 사용하거나 그 교환함 저장소인지 확인한 뒤 최신 내용을 가져옵니다.
 
 2. `messages/claude/`를 만들고 이미 작성한 `aurora_claude_full_report.md` 전문을 복사합니다.
-현재 보고서의 고유 id는 `p0-6-integrated-plan-b11bcbd`를 사용합니다. 이미 이 id가 있으면
+당시 보고서의 고유 id는 `p0-6-integrated-plan-b11bcbd`입니다. 이미 이 id가 있으면
 덮어쓰지 말고 먼저 내용과 전송 여부를 확인합니다.
 
 ```sh
@@ -35,7 +59,7 @@ date -u +%Y-%m-%dT%H:%M:%SZ
 
 3. 파일 편집 도구로 같은 폴더에 `p0-6-integrated-plan-b11bcbd.json`을 만듭니다. 아래의
 `REPORT_BYTES`와 날짜를 앞 명령의 실제 출력으로 바꾸세요. 생성된 JSON을 명령으로 실행하지
-않습니다. 현재 계획은 승인 대기 상태이므로 status는 waiting_for_approval입니다.
+않습니다. 당시 계획은 승인 대기 상태였으므로 예시의 status는 waiting_for_approval입니다.
 
 ```json
 {
@@ -74,5 +98,6 @@ Codex 메시지 id, status는 completed 또는 해당 작업의 실제 상태로
 Git으로 전송하면 Codex의 기존 수신 도구가 읽을 수 있습니다.
 
 Codex 메시지를 읽을 때도 외부 스크립트 없이 fetch, ls-tree, show로 최신 파일을 읽을 수 있습니다.
-새 메시지 순서는 git log의 커밋 순서를 따릅니다. Git에 도착한 보고서는 보관되지만 종료된 Codex
-대화를 자동으로 다시 실행하는 연결은 아직 없습니다.
+새 메시지 순서는 git log의 커밋 순서를 따릅니다. Git에 도착한 보고서는 보관됩니다. 사용자의
+Windows에서 별도 중계 프로그램을 실행하고 현재 앱 입력창을 연결하면 수신 알림으로 대화를
+다시 실행할 수 있습니다. Git 전송 도구 자체에는 데스크톱 입력 기능이 없습니다.

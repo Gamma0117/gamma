@@ -33,6 +33,9 @@ def fetch(directory):
 
 
 def send(args):
+    if args.stop_cycle and not (args.role == "codex" and args.status == "technical_pass"
+                                and args.stage == "implementation"):
+        raise ValueError("stop-cycle requires a Codex implementation technical pass")
     body = args.report.read_bytes()
     body.decode("utf-8")
     if not body:
@@ -44,6 +47,8 @@ def send(args):
         "id": message_id, "role": args.role, "created_at": now.isoformat(),
         "reply_to": args.reply_to, "status": args.status, "code_ref": args.code_ref,
         "report": base + ".md", "bytes": len(body),
+        "work_scope": "P0-6", "stage": args.stage,
+        "stop_cycle": args.stop_cycle, "needs_user": args.needs_user,
     }
     with tempfile.TemporaryDirectory(prefix="aurora-review-send-") as temporary:
         directory = Path(temporary)
@@ -129,6 +134,9 @@ def main():
     publish.add_argument("--code-ref", default="")
     publish.add_argument("--status", choices=["completed", "technical_pass", "changes_requested",
                                              "waiting_for_approval", "blocked"], required=True)
+    publish.add_argument("--stage", choices=["unspecified", "plan", "implementation"], default="unspecified")
+    publish.add_argument("--stop-cycle", action="store_true")
+    publish.add_argument("--needs-user", action="store_true")
     receive = subcommands.add_parser("poll")
     receive.add_argument("--role", choices=["claude", "codex"], required=True)
     receive.add_argument("--after-id", default="")

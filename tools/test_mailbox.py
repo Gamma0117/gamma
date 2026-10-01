@@ -59,4 +59,16 @@ with tempfile.TemporaryDirectory(prefix="aurora-relay-test-") as temporary:
     files = run("git", "-C", seed, "ls-tree", "-r", "--name-only", "FETCH_HEAD").splitlines()
     assert "README.md" in files
     assert len([name for name in files if name.endswith(".json")]) == 3
+    invalid = subprocess.run([sys.executable, str(TOOL), "--repo", str(remote), "send", "--role",
+                              "claude", "--report", str(report), "--status", "completed", "--stop-cycle"],
+                             capture_output=True, text=True)
+    assert invalid.returncode == 1 and "stop-cycle" in invalid.stderr
+    final = relay("send", "--role", "codex", "--report", report, "--status", "technical_pass",
+                  "--stage", "implementation", "--stop-cycle")
+    received_final = relay("poll", "--role", "codex")["messages"][0]
+    assert received_final["stop_cycle"] is True and received_final["stage"] == "implementation"
+    assert received_final["work_scope"] == "P0-6" and received_final["needs_user"] is False
+    question = relay("send", "--role", "claude", "--report", report, "--status", "blocked", "--needs-user")
+    assert relay("poll", "--role", "claude")["messages"][0]["needs_user"] is True
     print("PASS: UTF-8 full report, literal text, concurrent append-only send, reply ID, unread polling")
+    print("PASS: final implementation stop signal and user-decision signal")
