@@ -1,0 +1,11 @@
+ack_case {'arrivals': [1, 2, 4, 3], 'ack': [1, 3, 4]}
+ack_case {'arrivals': [1, 2, 2], 'ack': [1, 2]}
+ack_case {'arrivals': '1..40,40', 'ack': [37, 38, 39, 40]}
+singleton W/jump/neutral all consumed and acknowledged on tick 3
+neutralize_before_input input 10 remains neutral
+record_pause {'last_sent': 41, 'records': [38, 39, 40, 41], 'pause_entries': 1}
+resync_barrier {'drain_ticks': 2, 'first_new_input': 103, 'ack': 103}
+random_server_interleavings 20,000 ticks passed
+render_rate_phases {'cases': 300, 'rates': [30, 60, 144], 'dropped': 0, 'starvation_after_first_application': 0}
+minimum_body_ranges nonempty at 0, +/-16, +/-30,000,000
+same_frame_recapture capture remains true; old/new Space tap is discarded

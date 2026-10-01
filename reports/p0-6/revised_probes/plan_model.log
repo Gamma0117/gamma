@@ -1,0 +1,8 @@
+single_input_after_10_ticks {'pending': [1], 'ack': 0, 'applied': []}
+literal_max_retired_ack {'applied': 1, 'ack': 3, 'still_pending': [2, 4], 'pending_acknowledged': [2]}
+resync_continued_input {'tick': 1, 'last_sent': 103, 'ack': 101, 'first_record': 103, 'resync': True}
+resync_continued_input {'tick': 2, 'last_sent': 104, 'ack': 102, 'first_record': 104, 'resync': True}
+resync_continued_input {'tick': 3, 'last_sent': 105, 'ack': 103, 'first_record': 105, 'resync': True}
+resync_continued_input {'tick': 4, 'last_sent': 106, 'ack': 104, 'first_record': 106, 'resync': True}
+resync_continued_input {'tick': 5, 'last_sent': 107, 'ack': 105, 'first_record': 107, 'resync': True}
+valid_tiny_width_query {'width': 1e-08, 'first_cell': 16, 'last_cell': 15, 'empty': True}
