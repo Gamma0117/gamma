@@ -100,3 +100,36 @@ TEST_CASE("A mesh on the GPU stays drawable while its chunk load stays eligible"
     world.apply(loaded({0, 0}, 777));
     CHECK_FALSE(isDrawable(world, key)); // Another load of the same position.
 }
+
+TEST_CASE("Ready results upload or remove or are ignored against the GPU mesh", "[render][upload]")
+{
+    const MeshKey older{{{0, 0}, 7}, 1, 10};
+    const MeshKey newer{{{0, 0}, 7}, 1, 20};
+    ReadyMesh mesh{newer, {}};
+    mesh.mesh.vertexWords.assign(8, 0);
+    mesh.mesh.indices = {0, 1, 2, 0, 2, 3};
+    const ReadyMesh empty{newer, {}};
+
+    CHECK(chooseMeshUpdate(mesh, std::nullopt) == MeshUpdate::Upload);
+    CHECK(chooseMeshUpdate(mesh, older) == MeshUpdate::Upload);
+    CHECK(chooseMeshUpdate(empty, older) == MeshUpdate::Remove);  // Faces gone: the old mesh must go.
+    CHECK(chooseMeshUpdate(empty, std::nullopt) == MeshUpdate::Remove); // Nothing to remove; nothing to upload.
+
+    // A result made for older inputs never replaces or removes a newer mesh.
+    const ReadyMesh oldEmpty{older, {}};
+    ReadyMesh oldMesh = mesh;
+    oldMesh.key = older;
+    CHECK(chooseMeshUpdate(oldEmpty, newer) == MeshUpdate::Ignore);
+    CHECK(chooseMeshUpdate(oldMesh, newer) == MeshUpdate::Ignore);
+}
+
+TEST_CASE("A stale empty result never reaches the GPU table", "[render][upload]")
+{
+    ClientWorld world(1);
+    loadSquare(world, {0, 0}, 2);
+    const MeshKey stale = *world.currentKey({{0, 0}, 7});
+    world.apply(loaded({-1, 0}, 900)); // New stamp for (0, 0).
+    UploadQueue queue;
+    queue.push({ReadyMesh{stale, {}}});
+    CHECK(queue.take(world, 1 << 20).empty());
+}

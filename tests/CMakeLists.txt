@@ -27,7 +27,9 @@ add_executable(aurora_tests
     data/game_directory_tests.cpp
     data/path_probe_tests.cpp
     data/resource_id_tests.cpp
+    platform/input_state_tests.cpp
     render/chunk_mesher_tests.cpp
+    render/mesh_pipeline_tests.cpp
     render/upload_queue_tests.cpp
     server/integrated_server_tests.cpp
     support/png_test_support.cpp

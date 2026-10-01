@@ -52,7 +52,7 @@ void MeshScheduler::update(ClientWorld& world, world::ChunkPos cameraChunk, std:
 std::vector<ReadyMesh> MeshScheduler::takeReady()
 {
     for (const ReadyMesh& ready : m_ready) {
-        setState(ready.key, State::Meshed);
+        setState(ready.key, ready.mesh.empty() ? State::Empty : State::Meshed);
     }
     return std::exchange(m_ready, {});
 }
@@ -129,12 +129,9 @@ void MeshScheduler::collect(const ClientWorld& world)
         try {
             MeshData mesh = job->result.get();
             if (current) {
-                if (mesh.empty()) {
-                    record->second.state = State::Empty;
-                } else {
-                    record->second.state = State::Ready;
-                    m_ready.push_back({key, std::move(mesh)});
-                }
+                // Empty results go to the renderer as well: a section that had faces before must lose its old mesh.
+                record->second.state = State::Ready;
+                m_ready.push_back({key, std::move(mesh)});
             }
         } catch (const std::exception& e) {
             if (current) {

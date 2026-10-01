@@ -178,9 +178,6 @@ void handleInput(aurora::platform::Window& window, aurora::ui::ImGuiLayer& imgui
     if (window.wasKeyPressed(Key::Escape)) {
         cursor.onEscape();
     }
-    if (window.focusChanged()) {
-        cursor.onFocusChanged(window.isFocused());
-    }
     if (window.wasMouseButtonPressed(aurora::platform::MouseButton::Left)) {
         cursor.onClick(imgui.wantsMouse());
     }
@@ -300,6 +297,12 @@ int run(const LaunchOptions& options)
         {
             AURORA_PROFILE_ZONE_N("Input");
             window.pollEvents();
+            // Before the minimised branch below can skip the frame: losing focus must release the mouse.
+            if (window.takeFocusLost()) {
+                cursor.onFocusChanged(false);
+                window.setCursorCaptured(false);
+                imgui.setMouseEnabled(true);
+            }
             if (window.wasKeyPressed(platform::Key::F3)) {
                 overlay.toggle();
                 core::logInfo("app", "Debug overlay {}", overlay.isVisible() ? "shown" : "hidden");

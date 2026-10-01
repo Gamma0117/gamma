@@ -1,7 +1,7 @@
 #pragma once
 
-#include <array>
-#include <cstddef>
+#include "platform/input_state.h"
+
 #include <string>
 
 struct GLFWwindow;
@@ -14,25 +14,6 @@ struct WindowDesc {
     std::string title = "Aurora";
     bool vsync = true;
 };
-
-enum class Key {
-    Escape,
-    F3,
-    W,
-    A,
-    S,
-    D,
-    Space,
-    LeftShift,
-    LeftControl,
-};
-inline constexpr std::size_t kKeyCount = static_cast<std::size_t>(Key::LeftControl) + 1; // Keep in sync.
-
-enum class MouseButton {
-    Left,
-    Right,
-};
-inline constexpr std::size_t kMouseButtonCount = static_cast<std::size_t>(MouseButton::Right) + 1;
 
 // GLFW window with an OpenGL 4.5 core context. One window per process.
 class Window {
@@ -62,18 +43,18 @@ public:
 
     bool isKeyDown(Key key) const;
     // True if the key went down during the last pollEvents()/waitEvents(). Auto-repeat does not count.
-    bool wasKeyPressed(Key key) const;
-    bool wasMouseButtonPressed(MouseButton button) const { return m_buttonPressed[static_cast<std::size_t>(button)]; }
+    bool wasKeyPressed(Key key) const { return m_input.wasKeyPressed(key); }
+    bool wasMouseButtonPressed(MouseButton button) const { return m_input.wasButtonPressed(button); }
 
     // Latest cursor position in window pixels, and whether it changed during the last poll. While the cursor is
     // captured it keeps growing without bounds (relative movement).
-    bool cursorMoved() const { return m_cursorMoved; }
-    double cursorX() const { return m_cursorX; }
-    double cursorY() const { return m_cursorY; }
+    bool cursorMoved() const { return m_input.cursorMoved(); }
+    double cursorX() const { return m_input.cursorX(); }
+    double cursorY() const { return m_input.cursorY(); }
 
-    // Set when focus changed during the last poll: the new state.
-    bool focusChanged() const { return m_focusChanged; }
-    bool isFocused() const { return m_focused; }
+    bool isFocused() const { return m_input.isFocused(); }
+    // True once after the window lost focus, even if polls or waits came in between (see InputState).
+    bool takeFocusLost() { return m_input.takeFocusLost(); }
 
     // Captured: the cursor is hidden and locked to the window, and movement is reported unaccelerated (raw
     // motion) where the system supports it. Released: the normal cursor.
@@ -93,16 +74,9 @@ private:
     static void onMouseButton(GLFWwindow* handle, int button, int action, int mods);
     static void onCursorPos(GLFWwindow* handle, double x, double y);
     static void onFocus(GLFWwindow* handle, int focused);
-    void startInputFrame();
 
     GLFWwindow* m_handle = nullptr;
-    std::array<bool, kKeyCount> m_keyPressed{};
-    std::array<bool, kMouseButtonCount> m_buttonPressed{};
-    double m_cursorX = 0.0;
-    double m_cursorY = 0.0;
-    bool m_cursorMoved = false;
-    bool m_focused = true;
-    bool m_focusChanged = false;
+    InputState m_input;
     bool m_cursorCaptured = false;
     bool m_rawMouseMotion = false;
     int m_framebufferWidth = 0;

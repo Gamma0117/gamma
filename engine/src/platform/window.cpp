@@ -7,6 +7,8 @@
 #include <GLFW/glfw3.h>
 
 #include <algorithm>
+#include <array>
+#include <cstddef>
 
 namespace aurora::platform {
 
@@ -83,8 +85,12 @@ bool Window::create(const WindowDesc& desc)
     glfwSetMouseButtonCallback(m_handle, onMouseButton);
     glfwSetCursorPosCallback(m_handle, onCursorPos);
     glfwSetWindowFocusCallback(m_handle, onFocus);
-    glfwGetCursorPos(m_handle, &m_cursorX, &m_cursorY);
-    m_focused = glfwGetWindowAttrib(m_handle, GLFW_FOCUSED) == GLFW_TRUE;
+    double cursorX = 0.0;
+    double cursorY = 0.0;
+    glfwGetCursorPos(m_handle, &cursorX, &cursorY);
+    m_input.setCursor(cursorX, cursorY);
+    m_input.onFocus(glfwGetWindowAttrib(m_handle, GLFW_FOCUSED) == GLFW_TRUE);
+    m_input.takeFocusLost(); // Starting unfocused is not a loss.
     glfwGetFramebufferSize(m_handle, &m_framebufferWidth, &m_framebufferHeight);
     glViewport(0, 0, m_framebufferWidth, m_framebufferHeight);
 
@@ -120,22 +126,14 @@ void Window::requestClose()
 
 void Window::pollEvents()
 {
-    startInputFrame();
+    m_input.startFrame();
     glfwPollEvents();
 }
 
 void Window::waitEvents()
 {
-    startInputFrame();
+    m_input.startFrame();
     glfwWaitEvents();
-}
-
-void Window::startInputFrame()
-{
-    m_keyPressed.fill(false);
-    m_buttonPressed.fill(false);
-    m_cursorMoved = false;
-    m_focusChanged = false;
 }
 
 void Window::setCursorCaptured(bool captured)
@@ -166,11 +164,6 @@ bool Window::isKeyDown(Key key) const
     return m_handle != nullptr && glfwGetKey(m_handle, kGlfwKeys[keyIndex(key)]) == GLFW_PRESS;
 }
 
-bool Window::wasKeyPressed(Key key) const
-{
-    return m_keyPressed[keyIndex(key)];
-}
-
 void Window::onFramebufferResize(GLFWwindow* handle, int width, int height)
 {
     auto* self = static_cast<Window*>(glfwGetWindowUserPointer(handle));
@@ -189,7 +182,7 @@ void Window::onMouseButton(GLFWwindow* handle, int button, int action, int /*mod
     auto* self = static_cast<Window*>(glfwGetWindowUserPointer(handle));
     for (std::size_t i = 0; i < kMouseButtonCount; ++i) {
         if (kGlfwButtons[i] == button) {
-            self->m_buttonPressed[i] = true;
+            self->m_input.onButtonPressed(static_cast<MouseButton>(i));
         }
     }
 }
@@ -197,16 +190,13 @@ void Window::onMouseButton(GLFWwindow* handle, int button, int action, int /*mod
 void Window::onCursorPos(GLFWwindow* handle, double x, double y)
 {
     auto* self = static_cast<Window*>(glfwGetWindowUserPointer(handle));
-    self->m_cursorX = x;
-    self->m_cursorY = y;
-    self->m_cursorMoved = true;
+    self->m_input.onCursorMoved(x, y);
 }
 
 void Window::onFocus(GLFWwindow* handle, int focused)
 {
     auto* self = static_cast<Window*>(glfwGetWindowUserPointer(handle));
-    self->m_focused = focused == GLFW_TRUE;
-    self->m_focusChanged = true;
+    self->m_input.onFocus(focused == GLFW_TRUE);
 }
 
 void Window::onKey(GLFWwindow* handle, int key, int /*scancode*/, int action, int /*mods*/)
@@ -218,7 +208,7 @@ void Window::onKey(GLFWwindow* handle, int key, int /*scancode*/, int action, in
     auto* self = static_cast<Window*>(glfwGetWindowUserPointer(handle));
     for (std::size_t i = 0; i < kKeyCount; ++i) {
         if (kGlfwKeys[i] == key) {
-            self->m_keyPressed[i] = true;
+            self->m_input.onKeyPressed(static_cast<Key>(i));
         }
     }
 }

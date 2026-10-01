@@ -9,6 +9,7 @@
 #include <glad/glad.h>
 #include <glm/gtc/type_ptr.hpp>
 
+#include <optional>
 #include <utility>
 
 namespace aurora::render {
@@ -78,7 +79,22 @@ void ChunkRenderer::update(const client::ClientWorld& world, std::size_t byteBud
         return true;
     });
     for (const client::ReadyMesh& ready : m_uploads.take(world, byteBudget)) {
-        upload(ready);
+        const auto existing = m_meshes.find(ready.key.section);
+        const std::optional<client::MeshKey> onGpu =
+            existing == m_meshes.end() ? std::nullopt : std::optional(existing->second.key);
+        switch (chooseMeshUpdate(ready, onGpu)) {
+        case MeshUpdate::Upload:
+            upload(ready);
+            break;
+        case MeshUpdate::Remove:
+            if (existing != m_meshes.end()) {
+                release(existing->second);
+                m_meshes.erase(existing);
+            }
+            break;
+        case MeshUpdate::Ignore:
+            break;
+        }
     }
 }
 

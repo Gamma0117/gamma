@@ -269,7 +269,7 @@ TEST_CASE("Jobs the job system refuses fail without waiting and are not retried"
     CHECK(fixture.probe->started == 0);
 }
 
-TEST_CASE("Empty meshes are finished without anything to upload", "[client][mesh]")
+TEST_CASE("Empty results are handed over so the renderer can drop old meshes", "[client][mesh]")
 {
     Fixture fixture;
     fixture.probe->emptyMeshes = true;
@@ -277,8 +277,15 @@ TEST_CASE("Empty meshes are finished without anything to upload", "[client][mesh
     scheduler.update(fixture.world, {0, 0}, 7);
     fixture.jobs.waitIdle();
     scheduler.update(fixture.world, {0, 0}, 7);
-    CHECK(scheduler.takeReady().empty());
+    CHECK_FALSE(scheduler.isSettled()); // Not until the renderer has them.
+    const std::vector<ReadyMesh> ready = scheduler.takeReady();
+    CHECK(ready.size() == 9);
+    for (const ReadyMesh& result : ready) {
+        CHECK(result.mesh.empty());
+        CHECK(fixture.world.isCurrent(result.key));
+    }
     CHECK(scheduler.stats().empty == 9);
+    CHECK(scheduler.stats().meshed == 0);
     CHECK(scheduler.isSettled());
 }
 

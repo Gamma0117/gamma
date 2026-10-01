@@ -27,6 +27,14 @@ std::vector<client::ReadyMesh> UploadQueue::take(const client::ClientWorld& worl
     return taken;
 }
 
+MeshUpdate chooseMeshUpdate(const client::ReadyMesh& ready, const std::optional<client::MeshKey>& onGpu)
+{
+    if (onGpu && onGpu->stamp > ready.key.stamp) {
+        return MeshUpdate::Ignore;
+    }
+    return ready.mesh.empty() ? MeshUpdate::Remove : MeshUpdate::Upload;
+}
+
 std::size_t meshBytes(const client::MeshData& mesh)
 {
     return (mesh.vertexWords.size() + mesh.indices.size()) * sizeof(std::uint32_t);

@@ -18,17 +18,19 @@ namespace aurora::client {
 
 class ClientWorld;
 
+// A finished mesh for the renderer. An empty one is a result too: the section's current inputs have no faces, so
+// whatever the renderer still holds for the section must go.
 struct ReadyMesh {
     MeshKey key;
-    MeshData mesh; // Never empty.
+    MeshData mesh;
 };
 
 struct MeshSchedulerStats {
     std::size_t waiting = 0;  // Sections that need a mesh and have no job yet.
     std::size_t inFlight = 0; // Submitted jobs not finished yet, stale ones included.
-    std::size_t ready = 0;    // Finished meshes not yet taken by the renderer.
+    std::size_t ready = 0;    // Finished results (empty ones too) not yet taken by the renderer.
     std::size_t meshed = 0;   // Sections whose current mesh was handed to the renderer.
-    std::size_t empty = 0;    // Sections whose current mesh has no faces (nothing to upload).
+    std::size_t empty = 0;    // Sections whose current mesh has no faces (handed over to retire an older mesh).
     std::size_t failed = 0;   // Sections whose current inputs failed to mesh; not retried until they change.
 };
 
@@ -56,7 +58,8 @@ public:
     // submits more. `cameraSection` is the camera's section index (it may lie outside 0..23).
     void update(ClientWorld& world, world::ChunkPos cameraChunk, std::int32_t cameraSection);
 
-    // Finished meshes, nearest first as they were submitted. The renderer checks isCurrent() again before upload.
+    // Finished results in the order they completed, empty ones included. The renderer checks isCurrent() again
+    // before it uploads a mesh or, for an empty one, drops the section's old mesh.
     std::vector<ReadyMesh> takeReady();
 
     MeshSchedulerStats stats() const;

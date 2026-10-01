@@ -35,7 +35,8 @@ struct ChunkRenderStats {
 // GPU side of the chunk meshes: one buffer per section (vertices, then uint32 indices), drawn one call per
 // visible section with CPU frustum culling. Main thread only (it owns GL objects).
 //
-// - A queued mesh is uploaded only if ClientWorld::isCurrent() still holds for its key at upload time.
+// - A queued result is used only if ClientWorld::isCurrent() still holds for its key at upload time. A mesh
+//   replaces the section's GPU mesh; an empty result removes it (chooseMeshUpdate).
 // - A mesh on the GPU is dropped as soon as its chunk is unloaded, reloaded (new generation) or no longer
 //   eligible, so nothing is drawn for a chunk the client should not draw. A newer mesh for the same section
 //   replaces it when it is uploaded.
