@@ -1,4 +1,7 @@
 #include "core/job_system.h"
+#include "data/block_loader.h"
+#include "data/flat_preset.h"
+#include "data/player_movement.h"
 #include "entity/collision_shapes.h"
 #include "server/server_player.h"
 #include "server/world_collision_view.h"
@@ -15,6 +18,8 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <filesystem>
+#include <functional>
 #include <memory>
 #include <thread>
 
@@ -130,4 +135,94 @@ TEST_CASE("The spawn waits for the spawn chunk and its neighbours and stands on 
     // An empty column: the bottom of the world.
     tuning.width = 0.6;
     CHECK(server::findSpawn(world, {8, 8}, tuning) == glm::dvec3(8.5, -64.0, 8.5));
+}
+
+TEST_CASE("The shipped test course has a wall a passage a pit and stairs that behave", "[server][player][physics]")
+{
+    // The game's own data: blocks, the flat preset with its course (south of the spawn) and the movement settings.
+    const std::vector<data::DataPack> packs{{"aurora", std::filesystem::path(AURORA_SOURCE_DIR) / "game", true}};
+    const data::BlockLoadResult blocks = data::loadBlocks(packs);
+    REQUIRE(blocks.registry);
+    const data::FlatPresetLoadResult preset = data::loadFlatPreset(packs, *blocks.registry);
+    REQUIRE(preset.preset);
+    const data::PlayerMovementLoadResult movement = data::loadPlayerMovement(packs);
+    REQUIRE(movement.tuning);
+    core::JobSystem jobs(2);
+    world::World world(blocks.registry, jobs, world::makeFlatGenerator(preset.preset));
+    loadAround(world, 1);
+    const entity::CollisionShapes shapes = entity::CollisionShapes::fromRegistry(*blocks.registry);
+    const server::WorldCollisionView view(world);
+    const entity::CollisionWorld collision{view, shapes};
+
+    // Walks south (yaw 180) from `feet` for `ticks` ticks; `each` sees the motion after every tick.
+    std::uint32_t sequence = 0;
+    const auto walkSouth = [&](server::ServerPlayer& player, int ticks, bool jump,
+                               const std::function<void(const entity::PlayerMotion&)>& each = {}) {
+        for (int i = 0; i < ticks; ++i) {
+            player.receive({.kind = server::PlayerMessage::Kind::Input,
+                            .input = {++sequence, {.forward = 1, .jump = jump, .yaw = 180.0f}}});
+            player.tick(collision);
+            if (each) {
+                each(player.motion());
+            }
+        }
+    };
+    const auto spawnAt = [&](double x, double z) {
+        auto player = std::make_unique<server::ServerPlayer>(movement.tuning);
+        player->spawn({x, 64.0, z});
+        sequence = 0;
+        return player;
+    };
+
+    SECTION("The wall (x 5..7, z 5, two blocks high) stops walking and jumping")
+    {
+        const auto player = spawnAt(6.5, 2.5);
+        walkSouth(*player, 40, false);
+        CHECK(player->motion().position.z == Approx(4.7).margin(1e-6));
+        double furthest = 0.0;
+        walkSouth(*player, 60, true, [&](const entity::PlayerMotion& motion) {
+            furthest = std::max(furthest, motion.position.z);
+        });
+        CHECK(furthest <= 4.7 + 1e-6);
+    }
+    SECTION("The passage (x -5, z 5..9, roofed at y 66) fits the player and holds a jump down")
+    {
+        const auto player = spawnAt(-4.5, 0.5);
+        double highestInside = 0.0;
+        walkSouth(*player, 80, true, [&](const entity::PlayerMotion& motion) {
+            if (motion.position.z > 5.3 && motion.position.z < 9.7) {
+                highestInside = std::max(highestInside, motion.position.y);
+            }
+        });
+        CHECK(player->motion().position.z > 11.0); // Through and out.
+        CHECK(player->motion().position.x == -4.5);
+        CHECK(highestInside <= 66.0 - movement.tuning->height + 1e-6); // The head stops at the roof.
+        CHECK(highestInside > 64.0);                                   // But it did jump.
+    }
+    SECTION("The pit (x 9..11, z 5..7, two deep, a step at its south end) is climbed out by jumping")
+    {
+        const auto player = spawnAt(10.5, 2.5);
+        double lowest = 64.0;
+        walkSouth(*player, 40, false, [&](const entity::PlayerMotion& motion) {
+            lowest = std::min(lowest, motion.position.y);
+        });
+        CHECK(lowest == Approx(62.0).margin(1e-6)); // Fell to the bottom.
+        CHECK(player->motion().position.z < 7.0);   // Held by the step without jumping.
+        walkSouth(*player, 60, true);
+        CHECK(player->motion().position.z > 9.0); // Out on the far side.
+        CHECK(player->motion().position.y >= 64.0 - 1e-6);
+    }
+    SECTION("The cobblestone stairs (x 0..2, one block per step) are climbed by jumping, not by walking")
+    {
+        const auto player = spawnAt(1.5, 2.5);
+        walkSouth(*player, 40, false);
+        CHECK(player->motion().position.z == Approx(4.7).margin(1e-6)); // A full block is not a step.
+        double highestStanding = 0.0;
+        walkSouth(*player, 40, true, [&](const entity::PlayerMotion& motion) {
+            if (motion.onGround) {
+                highestStanding = std::max(highestStanding, motion.position.y);
+            }
+        });
+        CHECK(highestStanding == Approx(67.0).margin(1e-6)); // Stood on top of the third step.
+    }
 }

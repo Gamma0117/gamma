@@ -87,7 +87,7 @@ P0의 목표는 렌더거리 16청크에서 60fps로 걸으며 블록을 부수�
 | ChunkData | 서버 → | LZ4 압축 섹션 묶음 |
 | BlockChange / MultiBlockChange | 서버 → | 블록 변경 |
 | PlayerInput | → 서버 | 이동 키, 시선, 행동 (틱 번호 포함) |
-| PlayerState | 서버 → | 예측 보정용 위치·속도 |
+| PlayerState | 서버 → | 예측 보정용 위치·속도·자세(그 틱에 실제 적용한 웅크리기·달리기) |
 | EntitySpawn / Move / Remove | 서버 → | 다른 개체 |
 | DigAction / PlaceAction | → 서버 | 부수기 시작·취소·완료, 놓기 |
 | Chat / Command | 양방향 | 채팅·명령어 |

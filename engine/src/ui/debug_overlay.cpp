@@ -106,18 +106,20 @@ void drawPlayerSection(const DebugOverlayData& data, DebugOverlayActions& action
     const client::LocalPlayerStats stats = data.player->stats();
     ImGui::Text("Player %.3f / %.3f / %.3f%s", motion.position.x, motion.position.y, motion.position.z,
                 stats.frozen ? "  FROZEN (chunk not loaded)" : "");
-    ImGui::Text("  speed %.2f b/s, vertical %.2f, %s", std::hypot(motion.velocity.x, motion.velocity.z),
-                motion.velocity.y, motion.onGround ? "on ground" : "in the air");
+    ImGui::Text("  speed %.2f b/s, vertical %.2f, %s%s", std::hypot(motion.velocity.x, motion.velocity.z),
+                motion.velocity.y, motion.onGround ? "on ground" : "in the air",
+                motion.sneaking ? ", sneaking" : motion.sprinting ? ", sprinting" : "");
     ImGui::Text("  inputs sent %u, settled %u, unsettled %zu%s%s", stats.lastSent, stats.lastInput, stats.history,
                 stats.paused ? " PAUSED" : "", stats.resyncing ? " RESYNC" : "");
     ImGui::Text("  corrections %llu, pauses %llu, resyncs %llu", static_cast<unsigned long long>(stats.corrections),
                 static_cast<unsigned long long>(stats.inputPauses), static_cast<unsigned long long>(stats.resyncs));
     const server::ServerPlayerStats& server = data.server.player;
-    ImGui::Text("  server: waiting %zu, starved %llu, filling %llu, dropped %llu, late %llu", server.pendingInputs,
-                static_cast<unsigned long long>(server.starvedTicks),
+    ImGui::Text("  server: waiting %zu, starved %llu, filling %llu, dropped %llu, late %llu, before spawn %llu",
+                server.pendingInputs, static_cast<unsigned long long>(server.starvedTicks),
                 static_cast<unsigned long long>(server.primingTicks),
                 static_cast<unsigned long long>(server.droppedInputs),
-                static_cast<unsigned long long>(server.staleInputs));
+                static_cast<unsigned long long>(server.staleInputs),
+                static_cast<unsigned long long>(server.preSpawnMessages));
 }
 
 void drawSystemSection(platform::Window& window, const render::Renderer& renderer)

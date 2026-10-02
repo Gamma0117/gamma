@@ -6,6 +6,7 @@
 #include "entity/player_movement.h"
 #include "world/coordinates.h"
 
+#include <bit>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -92,6 +93,20 @@ private:
     std::map<std::tuple<std::int32_t, std::int32_t, std::int32_t>, data::BlockStateId> m_blocks;
     std::set<std::pair<std::int32_t, std::int32_t>> m_unloaded;
 };
+
+// Every field equal, the doubles bit for bit (so +0 and -0 differ, unlike PlayerMotion::operator==).
+inline bool sameBits(const entity::PlayerMotion& a, const entity::PlayerMotion& b)
+{
+    const auto same = [](double x, double y) {
+        return std::bit_cast<std::uint64_t>(x) == std::bit_cast<std::uint64_t>(y);
+    };
+    for (int axis = 0; axis < 3; ++axis) {
+        if (!same(a.position[axis], b.position[axis]) || !same(a.velocity[axis], b.velocity[axis])) {
+            return false;
+        }
+    }
+    return a.onGround == b.onGround && a.sneaking == b.sneaking && a.sprinting == b.sprinting;
+}
 
 // A player standing still at `feet`.
 inline entity::PlayerMotion standingAt(double x, double y, double z)

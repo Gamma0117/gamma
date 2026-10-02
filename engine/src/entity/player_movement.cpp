@@ -68,6 +68,8 @@ StepResult stepPlayer(PlayerMotion& motion, const MovementIntent& intent, const 
                       const CollisionWorld& world)
 {
     AURORA_PROFILE_ZONE_N("Player step");
+    motion.sneaking = intent.sneak;
+    motion.sprinting = isSprinting(intent);
     const Aabb box = playerBox(motion.position, tuning);
     if (touchesUnloadedColumn(world.view, box)) {
         motion.velocity = glm::dvec3(0.0);

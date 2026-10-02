@@ -33,7 +33,7 @@ constexpr std::array kFields{
     Field{"eye_height", &PlayerMovementTuning::eyeHeight, 0.0, false, kMaxPlayerSize},
     Field{"sneak_eye_height", &PlayerMovementTuning::sneakEyeHeight, 0.0, false, kMaxPlayerSize},
     Field{"step_height", &PlayerMovementTuning::stepHeight, 0.0, true, kMaxPlayerSize},
-    Field{"gravity", &PlayerMovementTuning::gravity, 0.0, true, 200.0},
+    Field{"gravity", &PlayerMovementTuning::gravity, 0.0, false, 200.0}, // 0 would never find the ground.
     Field{"terminal_velocity", &PlayerMovementTuning::terminalVelocity, 0.0, false, 200.0},
     Field{"jump_velocity", &PlayerMovementTuning::jumpVelocity, 0.0, true, 50.0},
     Field{"walk_speed", &PlayerMovementTuning::walkSpeed, 0.0, true, 50.0},

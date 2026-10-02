@@ -1,6 +1,5 @@
 #include "client/local_player.h"
 
-#include "client/movement_sampler.h"
 #include "core/log.h"
 #include "core/profiler.h"
 #include "entity/collision.h"
@@ -89,9 +88,7 @@ std::optional<entity::PlayerInput> LocalPlayer::tick(const entity::MovementInten
     entity::stepPlayer(next, sanitized, *m_tuning, world);
 
     m_previous = m_current;
-    m_previousSneak = m_currentSneak;
     m_current = next;
-    m_currentSneak = sanitized.sneak;
     ++m_lastSent;
     m_history.push_back({m_lastSent, sanitized, next});
     return entity::PlayerInput{m_lastSent, sanitized};
@@ -119,8 +116,8 @@ glm::dvec3 LocalPlayer::renderPosition(double alpha) const
 
 double LocalPlayer::eyeHeight(double alpha) const
 {
-    const double previous = eyeFor(m_previousSneak);
-    const double current = eyeFor(m_currentSneak);
+    const double previous = eyeFor(m_previous.sneaking);
+    const double current = eyeFor(m_current.sneaking);
     return previous + (current - previous) * alpha;
 }
 
@@ -142,21 +139,15 @@ LocalPlayerStats LocalPlayer::stats() const
 void LocalPlayer::replay(const entity::CollisionWorld& world, bool countCorrection)
 {
     const entity::PlayerMotion before = m_current;
-    entity::PlayerMotion motion = m_base->motion;
+    entity::PlayerMotion motion = m_base->motion; // With the pose of the server's last tick.
     entity::PlayerMotion previous = motion;
-    bool previousSneak = false;
-    bool sneak = false;
     for (Sent& sent : m_history) {
         previous = motion;
-        previousSneak = sneak;
         entity::stepPlayer(motion, sent.intent, *m_tuning, world);
         sent.after = motion;
-        sneak = sent.intent.sneak;
     }
     m_current = motion;
     m_previous = previous;
-    m_currentSneak = sneak;
-    m_previousSneak = m_history.size() >= 2 ? previousSneak : sneak;
     if (countCorrection && glm::distance(before.position, motion.position) > kCorrectionThreshold) {
         ++m_corrections;
     }
@@ -165,19 +156,11 @@ void LocalPlayer::replay(const entity::CollisionWorld& world, bool countCorrecti
 void LocalPlayer::hold()
 {
     m_previous = m_current;
-    m_previousSneak = m_currentSneak;
 }
 
 double LocalPlayer::eyeFor(bool sneaking) const
 {
     return sneaking ? m_tuning->sneakEyeHeight : m_tuning->eyeHeight;
-}
-
-std::optional<std::uint32_t> blockPlayerInput(MovementSampler& sampler, LocalPlayer& player,
-                                              const entity::CollisionWorld& world)
-{
-    sampler.block();
-    return player.neutralize(world);
 }
 
 } // namespace aurora::client

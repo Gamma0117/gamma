@@ -152,6 +152,9 @@ TEST_CASE("Messages before the spawn change nothing", "[server][player]")
     player.receive(neutralize(5));
     player.tick(blocks.world()); // Not spawned: nothing.
     CHECK(player.lastInput() == 0);
+    // Counted apart from late inputs (F3 "late" means late after the spawn).
+    CHECK(player.stats().preSpawnMessages == 6);
+    CHECK(player.stats().staleInputs == 0);
 
     player.spawn({0.5, 64.0, 0.5});
     player.receive(input(1, kWalkEast));
@@ -327,4 +330,13 @@ TEST_CASE("Random arrivals keep the settled run contract", "[server][player]")
         }
     }
     h.check();
+}
+
+TEST_CASE("A Neutralize before the spawn is not a late input", "[server][player]")
+{
+    ServerPlayer player(std::make_shared<const aurora::data::PlayerMovementTuning>(standardTuning()));
+    player.receive(neutralize(5));
+    CHECK(player.stats().preSpawnMessages == 1);
+    CHECK(player.stats().staleInputs == 0);
+    CHECK(player.lastInput() == 0);
 }

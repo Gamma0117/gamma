@@ -52,9 +52,11 @@ struct LocalPlayerStats {
 // - neutralize(): input stopped. Every unsettled input becomes neutral here as on the server (same look), the
 //   prediction is replayed (not counted as a correction), and the range is returned for the server once.
 //
-// Drawing: the position between the previous and the current tick's prediction (renderPosition(alpha)). Replays,
-// resyncs and the spawn set both from their own results, so no old prediction is ever blended in; a tick that
-// predicts nothing sets previous = current.
+// Drawing: the position between the previous and the current tick's prediction (renderPosition(alpha)), and the eye
+// height between their poses (eyeHeight(alpha)). Replays, resyncs and the spawn set both from their own results,
+// so no old prediction is ever blended in; a tick that predicts nothing sets previous = current. The pose is part
+// of the motion: a replay starts from the server's state with the pose of the intent the server applied last, so
+// a settled sneak stays low and a server's neutral tick stands the player up here too.
 class LocalPlayer {
 public:
     static constexpr std::size_t kMaxHistory = 40;
@@ -73,7 +75,7 @@ public:
     const entity::PlayerMotion& current() const { return m_current; }
     const entity::PlayerMotion& previous() const { return m_previous; }
     glm::dvec3 renderPosition(double alpha) const;
-    // Eye height above the feet, between the previous and current tick's (sneaking lowers it).
+    // Eye height above the feet, between the previous and current tick's poses (sneaking lowers it).
     double eyeHeight(double alpha) const;
     LocalPlayerStats stats() const;
 
@@ -99,8 +101,6 @@ private:
 
     entity::PlayerMotion m_current;
     entity::PlayerMotion m_previous;
-    bool m_currentSneak = false;
-    bool m_previousSneak = false;
 
     bool m_paused = false;
     bool m_resyncing = false;
@@ -109,13 +109,5 @@ private:
     std::uint64_t m_inputPauses = 0;
     std::uint64_t m_resyncs = 0;
 };
-
-class MovementSampler;
-
-// Input stopped (focus lost, mouse released, minimised, UI keyboard or free flight on): drops the pending jump and
-// makes the unsettled inputs neutral. Returns the range to send to the server as Neutralize, if there is a new one.
-// Call it as it happens, every time; repeated calls send nothing new.
-std::optional<std::uint32_t> blockPlayerInput(MovementSampler& sampler, LocalPlayer& player,
-                                              const entity::CollisionWorld& world);
 
 } // namespace aurora::client

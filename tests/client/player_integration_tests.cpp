@@ -139,13 +139,16 @@ TEST_CASE("Prediction against the real server thread converges to the authoritat
     }
     server.stop();
 
+    // Only the end is compared: the prediction runs ahead of the server, so a state in between would have to be
+    // matched by applied input, server tick and world (the lockstep and loop simulation tests do that), never by
+    // the wall clock.
     REQUIRE(newest);
     const client::LocalPlayerStats stats = player.stats();
     CHECK(stats.lastInput == stats.lastSent);
     CHECK(stats.history == 0);
     CHECK(stats.resyncs == 0);
     // Everything settled: the client stands exactly where the server put it.
-    CHECK(player.current() == newest->motion);
+    CHECK(test::sameBits(player.current(), newest->motion));
     CHECK(newest->motion.position.x > 0.5 + 4.0); // About 30 ticks of walking happened.
     CHECK(newest->motion.onGround);
     CHECK(server.stats().player.lastInput == stats.lastSent);

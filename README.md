@@ -72,7 +72,7 @@
      - `Meshes 289 done, … empty, 0 waiting, 0 in flight, 0 failed`: 섹션 메시 상태. 평지는 청크마다 지표 섹션 하나에 면이 있고, 땅속 섹션은 면이 없어서 `empty`다
      - `GPU 289 sections, 1156 vertices, … MB, 0 to upload`와 `drawn N sections in N calls`: GPU에 올라간 메시와, 카메라 시야(절두체) 안이라 실제로 그린 섹션 수
      - 마지막 줄: 마우스가 잡혔는지(`Mouse captured (Esc releases)`) 아닌지
-     - `Free-flying camera (debug)` 체크박스와 `Player …`: 플레이어 발 위치, 수평 속도(걷기 4.30, 달리기 5.60)·수직 속도, 땅에 있는지. `inputs sent / settled / unsettled`: 보낸 입력 수, 서버가 처리를 끝낸 번호, 아직 처리되지 않은 입력 수(보통 1~3). `corrections`(서버 결과로 위치를 고친 횟수, 보통 0이고 포커스를 잃는 순간 1 정도 늘 수 있음), `pauses`·`resyncs`(서버가 멈췄을 때만 늘어남). `server: waiting … starved … filling … dropped … late …`: 서버 쪽 입력 대기열 상태(평소 `starved 1, filling 1, dropped 0, late 0`)
+     - `Free-flying camera (debug)` 체크박스와 `Player …`: 플레이어 발 위치, 수평 속도(걷기 4.30, 달리기 5.60)·수직 속도, 땅에 있는지, `sneaking`/`sprinting`(Shift·Ctrl+W 중일 때). `inputs sent / settled / unsettled`: 보낸 입력 수, 서버가 처리를 끝낸 번호, 아직 처리되지 않은 입력 수(보통 1~3). `corrections`(서버 결과로 위치를 고친 횟수, 보통 0이고 포커스를 잃는 순간 1 정도 늘 수 있음), `pauses`·`resyncs`(서버가 멈췄을 때만 늘어남). `server: waiting … starved … filling … dropped … late … before spawn …`: 서버 쪽 입력 대기열 상태(평소 `starved 1, filling 1, dropped 0, late 0, before spawn 0`. `late`는 스폰 뒤 늦게 오거나 중복된 입력만 센다)
      - `Workers N`: 워커 스레드 수(논리 프로세서 수 − 2, 최소 1)
      - `Blocks 8 (10 states)`: 읽어 들인 블록 수(내장 공기·unknown 포함)와 블록 상태 수
      - 창 크기, VSync 체크박스(끄면 FPS가 크게 오르지만 서버는 20 TPS 그대로), OpenGL 버전(`4.5` 이상, Core Profile), GPU 이름, Tracy 상태

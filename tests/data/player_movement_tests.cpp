@@ -92,7 +92,9 @@ TEST_CASE("Player movement fields out of range are errors", "[data][movement]")
         {"step_height", "1.8", false},       // Not below the height.
         {"step_height", "0", true},
         {"gravity", "-1", false},
-        {"gravity", "0", true},
+        {"gravity", "0", false}, // Never on the ground: no jump, air acceleration only.
+        {"gravity", "0.001", true},
+        {"gravity", "200", true},
         {"gravity", "200.5", false},
         {"terminal_velocity", "0", false},
         {"terminal_velocity", "1e999", false}, // Too large to parse (the file is rejected as a whole).

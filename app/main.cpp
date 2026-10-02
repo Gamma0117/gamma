@@ -1,16 +1,14 @@
 #include "client/camera.h"
 #include "client/client_collision_view.h"
 #include "client/client_world.h"
-#include "client/cursor_controller.h"
-#include "client/local_player.h"
 #include "client/mesh_scheduler.h"
 #include "client/movement_sampler.h"
+#include "client/player_control.h"
 #include "core/constants.h"
 #include "core/job_system.h"
 #include "core/log.h"
 #include "core/profiler.h"
 #include "core/thread.h"
-#include "core/tick_scheduler.h"
 #include "core/timing_history.h"
 #include "core/utf8.h"
 #include "data/block_loader.h"
@@ -181,19 +179,13 @@ std::optional<GameData> loadGameData(const LaunchOptions& options)
                     gameDirectory.path / "assets" / std::string(data::kBaseNamespace) / "shaders"};
 }
 
-// Feeds this frame's window input to the cursor state and the camera's look; while flying freely, the movement
-// keys move the camera instead of the player.
+// The player's cursor state (Esc and clicks were handled by PlayerControl::input) reaches the window and the UI, the
+// mouse turns the camera; while flying freely, the movement keys move the camera instead of the player.
 void handleInput(aurora::platform::Window& window, aurora::ui::ImGuiLayer& imgui,
                  aurora::client::CursorController& cursor, aurora::client::Camera& camera, double frameSeconds,
                  bool freeFlight)
 {
     using aurora::platform::Key;
-    if (window.wasKeyPressed(Key::Escape)) {
-        cursor.onEscape();
-    }
-    if (window.wasMouseButtonPressed(aurora::platform::MouseButton::Left)) {
-        cursor.onClick(imgui.wantsMouse());
-    }
     window.setCursorCaptured(cursor.captured());
     imgui.setMouseEnabled(!cursor.captured());
     if (window.cursorMoved()) {
@@ -213,6 +205,20 @@ void handleInput(aurora::platform::Window& window, aurora::ui::ImGuiLayer& imgui
                     frameSeconds);
     }
 }
+
+// The local player's messages go to the integrated server's mailbox, in the order they are made.
+class ServerPlayerMailbox final : public aurora::client::PlayerMessageSink {
+public:
+    explicit ServerPlayerMailbox(aurora::server::IntegratedServer& server)
+        : m_server(server)
+    {
+    }
+    void sendInput(const aurora::entity::PlayerInput& input) override { m_server.sendPlayerInput(input); }
+    void sendNeutralize(std::uint32_t through) override { m_server.neutralizePlayerInputs(through); }
+
+private:
+    aurora::server::IntegratedServer& m_server;
+};
 
 aurora::client::MovementKeys heldMovementKeys(const aurora::platform::Window& window)
 {
@@ -274,7 +280,6 @@ int run(const LaunchOptions& options)
     }
 
     client::Camera camera({kStartX, kStartY, kStartZ}, kStartYaw, kStartPitch);
-    client::CursorController cursor;
 
     core::JobSystem jobs;
     // The server creates the world on its own thread and generates chunks on the job system's workers; the client
@@ -291,21 +296,13 @@ int run(const LaunchOptions& options)
     }
     client::ClientWorld clientWorld(kRenderDistance);
 
-    // The local player: predicted on the client's copy of the world with the same physics as the server's.
+    // The local player: predicted on the client's copy of the world with the same physics as the server's. The
+    // cursor, input blocking, client ticks and free-flight switch go through PlayerControl (the order is there).
     const entity::CollisionShapes collisionShapes = entity::CollisionShapes::fromRegistry(blocks);
     const client::ClientCollisionView collisionView(clientWorld);
     const entity::CollisionWorld collision{collisionView, collisionShapes};
-    client::LocalPlayer localPlayer(gameData->movement);
-    client::MovementSampler movementSampler;
-    core::TickScheduler clientTicks(core::kTickInterval, core::kMaxClientCatchUpTicks);
-    bool freeFlight = false;
-    // Input stopped: no pending jump, unsettled inputs neutral here and on the server. Called as it happens.
-    const auto blockPlayerInput = [&] {
-        if (const std::optional<std::uint32_t> through =
-                client::blockPlayerInput(movementSampler, localPlayer, collision)) {
-            server.neutralizePlayerInputs(*through);
-        }
-    };
+    ServerPlayerMailbox playerMailbox(server);
+    client::PlayerControl player(gameData->movement, collision, playerMailbox);
     client::MeshScheduler meshScheduler(jobs, render::makeChunkMesher(meshResources),
                                         jobs.workerCount() * kMeshJobsPerWorker);
 
@@ -335,15 +332,15 @@ int run(const LaunchOptions& options)
         previousFrameStart = frameStart;
         hasPreviousFrame = true;
 
+        bool focusLost = false;
         {
             AURORA_PROFILE_ZONE_N("Input");
             window.pollEvents();
             // Before the minimised branch below can skip the frame: losing focus must release the mouse.
-            if (window.takeFocusLost()) {
-                cursor.onFocusChanged(false);
+            focusLost = window.takeFocusLost();
+            if (focusLost) {
                 window.setCursorCaptured(false);
                 imgui.setMouseEnabled(true);
-                blockPlayerInput();
             }
             if (window.wasKeyPressed(platform::Key::F3)) {
                 overlay.toggle();
@@ -351,7 +348,7 @@ int run(const LaunchOptions& options)
             }
         }
         if (window.isMinimized()) {
-            blockPlayerInput(); // No ticks run while minimised; the server goes on with neutral ticks.
+            player.input({.focusLost = focusLost, .minimised = true}); // Blocks; the server goes on with neutral ticks.
             window.waitEvents();
             hasPreviousFrame = false; // Time spent minimized is not a frame.
             continue;
@@ -359,19 +356,17 @@ int run(const LaunchOptions& options)
         // ImGui takes this frame's events first, so whether it wants a click is known for where the cursor is
         // now: a click on the F3 panel never captures the mouse, even when the cursor got there this very frame.
         imgui.beginFrame();
+        player.input({.focusLost = focusLost,
+                      .focused = window.isFocused(),
+                      .escapePressed = window.wasKeyPressed(platform::Key::Escape),
+                      .clickPressed = window.wasMouseButtonPressed(platform::MouseButton::Left),
+                      .uiWantsMouse = imgui.wantsMouse(),
+                      .uiWantsKeyboard = imgui.wantsKeyboard(),
+                      .jumpPressed = window.wasKeyPressed(platform::Key::Space),
+                      .enabled = !options.screenshot});
         if (!options.screenshot) {
-            handleInput(window, imgui, cursor, camera, frameSeconds, freeFlight);
+            handleInput(window, imgui, player.cursor(), camera, frameSeconds, player.freeFlight());
         }
-        // A release counts even if a click of the same poll captured again: the input was interrupted.
-        if (cursor.takeReleased()) {
-            blockPlayerInput();
-        }
-        const bool acceptingInput = !options.screenshot && window.isFocused() &&
-                                    cursor.acceptsMovement(imgui.wantsKeyboard()) && !freeFlight;
-        if (!acceptingInput && movementSampler.accepting()) {
-            blockPlayerInput(); // Stopped this frame (UI keyboard, free flight); the events above block on their own.
-        }
-        movementSampler.endFrame(acceptingInput, window.wasKeyPressed(platform::Key::Space));
 
         {
             AURORA_PROFILE_ZONE_N("World view");
@@ -381,32 +376,12 @@ int run(const LaunchOptions& options)
 
             // The player: the newest server state, then this frame's client ticks.
             const Clock::time_point now = Clock::now();
-            if (const std::optional<entity::PlayerState> state = server.takePlayerState()) {
-                const bool spawning = !localPlayer.spawned();
-                localPlayer.receive(*state, collision);
-                if (spawning) {
-                    clientTicks.reset(now);
-                    core::logInfo("app", "Player spawned at ({:.2f}, {:.2f}, {:.2f})", state->motion.position.x,
-                                  state->motion.position.y, state->motion.position.z);
-                }
+            player.update(server.takePlayerState(), now, heldMovementKeys(window), static_cast<float>(camera.yaw()),
+                          static_cast<float>(camera.pitch()));
+            if (player.localPlayer().spawned() && !player.freeFlight()) {
+                camera.setPosition(player.eyePosition(now));
             }
-            if (localPlayer.spawned()) {
-                const std::uint32_t ticks = clientTicks.advance(now).ticksToRun;
-                for (std::uint32_t i = 0; i < ticks; ++i) {
-                    const entity::MovementIntent intent =
-                        movementSampler.sample(heldMovementKeys(window), static_cast<float>(camera.yaw()),
-                                               static_cast<float>(camera.pitch()));
-                    if (const std::optional<entity::PlayerInput> input = localPlayer.tick(intent, collision)) {
-                        server.sendPlayerInput(*input);
-                    }
-                }
-                if (!freeFlight) {
-                    const double alpha = clientTicks.progress(now);
-                    camera.setPosition(localPlayer.renderPosition(alpha) +
-                                       glm::dvec3(0.0, localPlayer.eyeHeight(alpha), 0.0));
-                }
-            }
-            server.setViewCenterOverride(freeFlight ? std::optional(camera.chunk()) : std::nullopt);
+            server.setViewCenterOverride(player.freeFlight() ? std::optional(camera.chunk()) : std::nullopt);
 
             const world::ChunkPos center = camera.chunk();
             clientWorld.setCenter(center);
@@ -426,8 +401,8 @@ int run(const LaunchOptions& options)
 
             // Captured before the UI is drawn, once every chunk around the camera is meshed and uploaded.
             if (options.screenshot) {
-                const bool ready = localPlayer.spawned() && clientWorld.isAreaComplete() && meshScheduler.isSettled() &&
-                                   chunkRenderer.pendingUploads() == 0;
+                const bool ready = player.localPlayer().spawned() && clientWorld.isAreaComplete() &&
+                                   meshScheduler.isSettled() && chunkRenderer.pendingUploads() == 0;
                 if (ready) {
                     std::string error;
                     if (render::saveFramebufferPng(*options.screenshot, window.framebufferWidth(),
@@ -450,7 +425,7 @@ int run(const LaunchOptions& options)
                                    kScreenshotTimeout.count(), clientWorld.eligibleCount(),
                                    (2 * kRenderDistance + 1) * (2 * kRenderDistance + 1), meshes.waiting,
                                    meshes.inFlight, meshes.failed, chunkRenderer.pendingUploads(),
-                                   localPlayer.spawned() ? "spawned" : "not spawned");
+                                   player.localPlayer().spawned() ? "spawned" : "not spawned");
                     exitCode = 1;
                     window.requestClose();
                 }
@@ -471,16 +446,13 @@ int run(const LaunchOptions& options)
                     .chunksDrawable = clientWorld.eligibleCount(),
                     .meshes = meshScheduler.stats(),
                     .gpu = chunkRenderer.stats(),
-                    .cursorCaptured = cursor.captured(),
-                    .player = &localPlayer,
-                    .freeFlight = freeFlight,
+                    .cursorCaptured = player.cursor().captured(),
+                    .player = &player.localPlayer(),
+                    .freeFlight = player.freeFlight(),
                 };
                 if (overlay.draw(window, renderer, overlayData).toggleFreeFlight) {
-                    freeFlight = !freeFlight;
-                    if (freeFlight) {
-                        blockPlayerInput(); // In this frame: the player must not keep walking until the next.
-                    }
-                    core::logInfo("app", "Free-flying camera {}", freeFlight ? "on" : "off");
+                    player.setFreeFlight(!player.freeFlight()); // Switching on blocks in this frame.
+                    core::logInfo("app", "Free-flying camera {}", player.freeFlight() ? "on" : "off");
                 }
             }
             imgui.endFrame();

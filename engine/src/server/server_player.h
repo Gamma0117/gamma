@@ -104,6 +104,7 @@ private:
     std::uint64_t m_primingTicks = 0;
     std::uint64_t m_droppedInputs = 0;
     std::uint64_t m_staleInputs = 0;
+    std::uint64_t m_preSpawnMessages = 0;
 };
 
 // The block column the local player spawns in.

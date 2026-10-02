@@ -110,7 +110,7 @@ game/
 | `eye_height` | 0 초과 ~ `height` | 카메라 높이(발 기준) |
 | `sneak_eye_height` | 0 초과 ~ `eye_height` | 웅크렸을 때 카메라 높이 |
 | `step_height` | 0 ~ `height` 미만 | 점프 없이 저절로 오르는 턱의 최대 높이 |
-| `gravity` | 0 ~ 200 | 블록/초² |
+| `gravity` | 0 초과 ~ 200 | 블록/초². 땅은 떨어지다 막혀서 찾으므로 0이면 서 있어도 땅에 닿지 않아 점프·땅 가속이 안 된다(그래서 0은 오류) |
 | `terminal_velocity` | 0 초과 ~ 200 | 가장 빠른 낙하 속도 |
 | `jump_velocity` | 0 ~ 50 | 점프 순간의 위쪽 속도. 9.8이면 꼭대기 약 1.26블록 |
 | `walk_speed`, `sprint_speed`, `sneak_speed` | 0 ~ 50 | 걷기, 달리기(앞으로 갈 때만, 웅크리면 무시), 웅크리기 속도 |

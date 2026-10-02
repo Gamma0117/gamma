@@ -31,7 +31,7 @@ void ServerPlayer::spawn(const glm::dvec3& feet)
 void ServerPlayer::receive(const PlayerMessage& message)
 {
     if (!m_spawned) {
-        ++m_staleInputs; // The client sends nothing before it saw the spawn; whatever came is ignored.
+        ++m_preSpawnMessages; // The client sends nothing before it saw the spawn; whatever came is ignored.
         return;
     }
     if (message.kind == PlayerMessage::Kind::Neutralize) {
@@ -119,7 +119,8 @@ ServerPlayerStats ServerPlayer::stats() const
             .starvedTicks = m_starvedTicks,
             .primingTicks = m_primingTicks,
             .droppedInputs = m_droppedInputs,
-            .staleInputs = m_staleInputs};
+            .staleInputs = m_staleInputs,
+            .preSpawnMessages = m_preSpawnMessages};
 }
 
 std::optional<glm::dvec3> findSpawn(const world::World& world, SpawnColumn column,

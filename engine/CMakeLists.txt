@@ -105,6 +105,7 @@ add_library(aurora_client STATIC
     src/client/local_player.cpp
     src/client/mesh_scheduler.cpp
     src/client/movement_sampler.cpp
+    src/client/player_control.cpp
 )
 add_library(aurora::client ALIAS aurora_client)
 target_link_libraries(aurora_client PUBLIC aurora::entity)

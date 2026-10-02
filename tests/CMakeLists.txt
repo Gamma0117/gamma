@@ -102,8 +102,15 @@ add_test(NAME app_movement_errors
             "-DEXPECT2=movement.json /step_height: must be below height \\(1.8\\): got 2.5"
             "-DEXPECT3=The player movement settings have 2 error\\(s\\)"
             "-DFORBID=GLFW|Window|OpenGL|Server" -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/run_app.cmake")
+# Valid in every other way, but gravity 0 (the player would never find the ground): the same early exit.
+add_test(NAME app_movement_zero_gravity
+    COMMAND "${CMAKE_COMMAND}" -DAPP=$<TARGET_FILE:aurora>
+            "-DGAME_DIR=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/zero_gravity_game" -DEXPECT_EXIT=1 -DNO_DISPLAY=ON
+            "-DEXPECT1=movement.json /gravity: expected a number in \\(0, 200\\], got number 0"
+            "-DEXPECT2=The player movement settings have 1 error\\(s\\)"
+            "-DFORBID=GLFW|Window|OpenGL|Server" -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/run_app.cmake")
 set_tests_properties(app_game_dir_missing app_data_errors app_preset_errors app_texture_errors app_movement_errors
-                     PROPERTIES LABELS app TIMEOUT 60)
+                     app_movement_zero_gravity PROPERTIES LABELS app TIMEOUT 60)
 
 # Broken links (made at test time; symlinks in git are unreliable on Windows) must stop the start like any other
 # unreadable data, never be skipped as "missing".
@@ -144,19 +151,20 @@ if(UNIX AND NOT APPLE)
             COMMAND "${XVFB_RUN}" -a -s "-screen 0 1280x720x24" $<TARGET_FILE:aurora> --frames 60 --debug-overlay)
         set_tests_properties(app_smoke PROPERTIES LABELS smoke TIMEOUT 60)
 
-        # The start view once the world around it is drawn: sky above, grass below. The second run draws
-        # everything but the chunks and must be told apart (the checker reports "no terrain"); a failed run or a
-        # missing or broken image fails both.
+        # The start view once the world around it is drawn: sky above, grass below, seen from the player's eyes
+        # (spawn + eye_height, start pitch -25). The second run draws everything but the chunks and must be told
+        # apart (the checker reports "no terrain"); a failed run, a camera not at the eyes or a missing or broken
+        # image fails both.
         set(screenshot_dir "${CMAKE_CURRENT_BINARY_DIR}/screenshots")
         file(MAKE_DIRECTORY "${screenshot_dir}")
         add_test(NAME app_render_screenshot
             COMMAND "${CMAKE_COMMAND}" "-DXVFB_RUN=${XVFB_RUN}" -DAPP=$<TARGET_FILE:aurora>
                     -DCHECKER=$<TARGET_FILE:aurora_screenshot_check> "-DOUTPUT=${screenshot_dir}/start_view.png"
-                    -DEXPECT=terrain -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/run_screenshot.cmake")
+                    -DEXPECT=terrain -DEXPECT_PITCH=-25.0 -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/run_screenshot.cmake")
         add_test(NAME app_render_screenshot_without_world
             COMMAND "${CMAKE_COMMAND}" "-DXVFB_RUN=${XVFB_RUN}" -DAPP=$<TARGET_FILE:aurora>
                     -DCHECKER=$<TARGET_FILE:aurora_screenshot_check>
-                    "-DOUTPUT=${screenshot_dir}/start_view_no_world.png" -DEXPECT=no_terrain
+                    "-DOUTPUT=${screenshot_dir}/start_view_no_world.png" -DEXPECT=no_terrain -DEXPECT_PITCH=-25.0
                     -DAPP_ARGS=--no-world-draw -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/run_screenshot.cmake")
         set_tests_properties(app_render_screenshot app_render_screenshot_without_world
                              PROPERTIES LABELS smoke TIMEOUT 120)

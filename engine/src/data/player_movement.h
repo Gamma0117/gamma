@@ -46,7 +46,7 @@ struct PlayerMovementLoadResult {
 //   eye_height                   (0, height]
 //   sneak_eye_height             (0, eye_height]
 //   step_height                  [0, height)
-//   gravity                      [0, 200]
+//   gravity                      (0, 200]  (the ground is found by falling onto it, so 0 never stands)
 //   terminal_velocity            (0, 200]
 //   jump_velocity, walk_speed, sprint_speed, sneak_speed   [0, 50]
 //   ground_acceleration, air_acceleration                  (0, 1]

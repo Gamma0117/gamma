@@ -17,7 +17,8 @@ struct ServerPlayerStats {
     std::uint64_t starvedTicks = 0; // Ticks with no input waiting: neutral intent.
     std::uint64_t primingTicks = 0; // Ticks waiting for a second input after starving.
     std::uint64_t droppedInputs = 0; // Over kMaxPendingInputs; never applied.
-    std::uint64_t staleInputs = 0;   // Not above the highest sequence received (late or duplicate), or before spawn.
+    std::uint64_t staleInputs = 0;   // Not above the highest sequence received: late or duplicate.
+    std::uint64_t preSpawnMessages = 0; // Inputs and Neutralize before the spawn (the client sends none then).
 };
 
 // Snapshot of the server loop for debug display. Plain data, copied out under the server's lock.

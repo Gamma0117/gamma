@@ -426,3 +426,25 @@ TEST_CASE("Intents are sanitised before use", "[entity][movement]")
     CHECK(tamed.jump);
     CHECK(sanitizeIntent(tamed, 0.0f, 0.0f) == tamed); // Already valid: unchanged.
 }
+
+TEST_CASE("The motion carries the pose of the intent the step used", "[entity][movement]")
+{
+    TestBlocks blocks;
+    PlayerMotion motion = standingAt(0.5, 64.0, 0.5);
+    stepPlayer(motion, with(walk(1, 0, kEast), false, true, true), standardTuning(), blocks.world());
+    CHECK(motion.sneaking);
+    CHECK_FALSE(motion.sprinting); // Sneaking wins.
+    stepPlayer(motion, with(walk(1, 0, kEast), false, false, true), standardTuning(), blocks.world());
+    CHECK_FALSE(motion.sneaking);
+    CHECK(motion.sprinting);
+    stepPlayer(motion, MovementIntent{}, standardTuning(), blocks.world());
+    CHECK_FALSE(motion.sneaking);
+    CHECK_FALSE(motion.sprinting);
+
+    // Frozen (rule B): nothing moves, but the pose is the intent's.
+    blocks.unload({0, 0});
+    const glm::dvec3 before = motion.position;
+    CHECK(stepPlayer(motion, with(walk(1, 0, kEast), false, true, false), standardTuning(), blocks.world()).frozen);
+    CHECK(motion.position == before);
+    CHECK(motion.sneaking);
+}

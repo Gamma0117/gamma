@@ -37,6 +37,10 @@ struct PlayerMotion {
     glm::dvec3 position{0.0};
     glm::dvec3 velocity{0.0}; // Blocks per second.
     bool onGround = false;
+    // The pose of the last step, from the intent it used (sneaking lowers the eyes). Part of the state so the
+    // server's state carries the pose of the intent it really applied, never one it dropped or neutralised.
+    bool sneaking = false;
+    bool sprinting = false; // isSprinting() of that intent.
 
     bool operator==(const PlayerMotion&) const = default;
 };
@@ -49,6 +53,7 @@ bool isSprinting(const MovementIntent& intent);
 
 // One tick (core::kSecondsPerTick) of player movement, the same on the server (authoritative) and the client
 // (prediction):
+//  0. The pose (sneaking, sprinting) becomes the intent's, also on a frozen tick.
 //  1. Rule B: if the box overlaps a column that is not loaded, nothing moves and the velocity becomes zero; the
 //     result says frozen.
 //  2. Wish direction from forward/strafe, turned by the yaw; diagonals are normalised.
