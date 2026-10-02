@@ -68,7 +68,9 @@ std::optional<std::vector<std::byte>> readFileBytes(const std::filesystem::path&
         return std::nullopt;
     }
     std::vector<std::byte> bytes(text.size());
-    std::memcpy(bytes.data(), text.data(), text.size());
+    if (!text.empty()) { // An empty file has no buffers: memcpy must not see their null pointers.
+        std::memcpy(bytes.data(), text.data(), text.size());
+    }
     return bytes;
 }
 

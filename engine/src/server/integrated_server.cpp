@@ -6,10 +6,14 @@
 #include "core/thread.h"
 #include "core/tick_scheduler.h"
 #include "core/timing_history.h"
+#include "data/player_movement.h"
+#include "entity/collision_shapes.h"
+#include "server/world_collision_view.h"
 #include "world/flat_generator.h"
 #include "world/world.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <exception>
 #include <iterator>
@@ -45,7 +49,6 @@ IntegratedServer::IntegratedServer()
 IntegratedServer::IntegratedServer(ServerConfig config, ServerTestHooks hooks)
     : m_config(std::move(config))
     , m_hooks(std::move(hooks))
-    , m_viewCenter(m_config.viewCenter)
 {
     const bool partial = m_config.jobs || m_config.blocks || m_config.flatPreset;
     if (partial && !hasWorldConfig(m_config)) {
@@ -71,7 +74,10 @@ bool IntegratedServer::start()
         m_stats = ServerStats{};
         m_stats.running = true;
         m_stats.hasWorld = hasWorldConfig(m_config);
+        m_stats.hasPlayer = m_stats.hasWorld && m_config.playerMovement;
         m_chunkUpdates.clear();
+        m_playerMessages.clear();
+        m_playerState.reset();
     }
     try {
         m_thread = std::thread(&IntegratedServer::run, this);
@@ -110,16 +116,34 @@ ServerStats IntegratedServer::stats() const
     return m_stats;
 }
 
-void IntegratedServer::setViewCenter(world::ChunkPos center)
+void IntegratedServer::setViewCenterOverride(std::optional<world::ChunkPos> center)
 {
     std::lock_guard lock(m_mutex);
-    m_viewCenter = center;
+    m_viewCenterOverride = center;
 }
 
 std::vector<world::ChunkUpdate> IntegratedServer::takeChunkUpdates()
 {
     std::lock_guard lock(m_mutex);
     return std::exchange(m_chunkUpdates, {});
+}
+
+void IntegratedServer::sendPlayerInput(const entity::PlayerInput& input)
+{
+    std::lock_guard lock(m_mutex);
+    m_playerMessages.push_back({.kind = PlayerMessage::Kind::Input, .input = input});
+}
+
+void IntegratedServer::neutralizePlayerInputs(std::uint32_t through)
+{
+    std::lock_guard lock(m_mutex);
+    m_playerMessages.push_back({.kind = PlayerMessage::Kind::Neutralize, .through = through});
+}
+
+std::optional<entity::PlayerState> IntegratedServer::takePlayerState()
+{
+    std::lock_guard lock(m_mutex);
+    return std::exchange(m_playerState, std::nullopt);
 }
 
 void IntegratedServer::run()
@@ -146,16 +170,26 @@ void IntegratedServer::runLoop()
 {
     core::logInfo("server", "Server thread started ({} ticks per second)", core::kTicksPerSecond);
 
-    // Owned by this thread only; other threads see copies in m_stats.
+    // Owned by this thread only; other threads see copies in m_stats and the mailboxes.
     std::unique_ptr<world::World> world;
+    std::unique_ptr<ServerPlayer> player;
+    std::shared_ptr<const entity::CollisionShapes> shapes = m_config.collisionShapes;
     const std::int32_t loadRadius = std::max(0, m_config.loadRadius);
     if (hasWorldConfig(m_config)) {
         world = std::make_unique<world::World>(m_config.blocks, *m_config.jobs,
                                                world::makeFlatGenerator(m_config.flatPreset));
         const std::int64_t side = 2 * static_cast<std::int64_t>(loadRadius) + 1;
-        core::logInfo("server", "Flat world: loading {} chunks around the view center (radius {})", side * side,
+        core::logInfo("server", "Flat world: loading {} chunks around the load center (radius {})", side * side,
                       loadRadius);
+        if (m_config.playerMovement) {
+            player = std::make_unique<ServerPlayer>(m_config.playerMovement);
+            if (!shapes) {
+                shapes = std::make_shared<const entity::CollisionShapes>(
+                    entity::CollisionShapes::fromRegistry(*m_config.blocks));
+            }
+        }
     }
+    const Simulation simulation{world.get(), player.get(), shapes.get()};
 
     core::TickScheduler scheduler(core::kTickInterval, core::kMaxCatchUpTicks);
     core::TimingHistory tickTimes(kTickHistory);
@@ -191,7 +225,7 @@ void IntegratedServer::runLoop()
 
         for (std::uint32_t i = 0; i < advance.ticksToRun; ++i) {
             const Clock::time_point tickStart = now();
-            tick(tickCount + 1, world.get());
+            tick(tickCount + 1, simulation);
             const Clock::time_point tickEnd = now();
             AURORA_PROFILE_FRAME_N("Server");
 
@@ -240,32 +274,84 @@ void IntegratedServer::runLoop()
     }
     lock.unlock();
 
+    player.reset();
     world.reset(); // On this thread, which owns it. Queued generation jobs finish without it.
     const std::chrono::duration<double> uptime = now() - startTime;
     core::logInfo("server", "Server thread stopped: {} ticks in {:.2f} s, last measured {:.2f} TPS, {} skipped",
                   tickCount, uptime.count(), ticksPerSecond, skippedTicks);
 }
 
-void IntegratedServer::tick(std::uint64_t tickNumber, world::World* world)
+void IntegratedServer::tick(std::uint64_t tickNumber, const Simulation& simulation)
 {
     AURORA_PROFILE_ZONE_N("Server tick");
     if (m_hooks.onTick) {
         m_hooks.onTick(tickNumber);
     }
-    if (world) {
-        world::ChunkPos center;
-        {
-            std::lock_guard lock(m_mutex);
-            center = m_viewCenter;
+    if (!simulation.world) {
+        return;
+    }
+    world::World& world = *simulation.world;
+    ServerPlayer* player = simulation.player;
+
+    std::vector<PlayerMessage> messages;
+    std::optional<world::ChunkPos> override;
+    {
+        std::lock_guard lock(m_mutex);
+        messages = std::exchange(m_playerMessages, {});
+        override = m_viewCenterOverride;
+    }
+    if (player) {
+        for (const PlayerMessage& message : messages) {
+            player->receive(message);
         }
-        world->ensureLoaded(center, std::max(0, m_config.loadRadius));
-        world->update();
-        std::vector<world::ChunkUpdate> updates = world->takeChunkUpdates();
-        if (!updates.empty()) {
-            std::lock_guard lock(m_mutex);
-            m_chunkUpdates.insert(m_chunkUpdates.end(), std::make_move_iterator(updates.begin()),
-                                  std::make_move_iterator(updates.end()));
+    }
+
+    world.ensureLoaded(loadCenter(player, override), std::max(0, m_config.loadRadius));
+    world.update();
+    std::vector<world::ChunkUpdate> updates = world.takeChunkUpdates();
+    if (!updates.empty()) {
+        std::lock_guard lock(m_mutex);
+        m_chunkUpdates.insert(m_chunkUpdates.end(), std::make_move_iterator(updates.begin()),
+                              std::make_move_iterator(updates.end()));
+    }
+
+    if (player) {
+        if (!player->spawned()) {
+            trySpawn(world, *player);
         }
+        const WorldCollisionView view(world);
+        player->tick({view, *simulation.shapes});
+        if (player->spawned()) {
+            const entity::PlayerState state = player->state(tickNumber);
+            std::lock_guard lock(m_mutex);
+            m_playerState = state;
+            m_stats.player = player->stats();
+        }
+    }
+}
+
+world::ChunkPos IntegratedServer::loadCenter(const ServerPlayer* player, std::optional<world::ChunkPos> override) const
+{
+    const world::ChunkPos spawnChunk = world::chunkPosOf({m_config.spawnColumn.x, 0, m_config.spawnColumn.z});
+    if (player && !player->spawned()) {
+        return spawnChunk; // The spawn area first, whatever the client asks for.
+    }
+    if (override) {
+        return *override;
+    }
+    if (player) {
+        const glm::dvec3& position = player->motion().position;
+        return world::chunkPosOf({static_cast<std::int32_t>(std::floor(position.x)), 0,
+                                  static_cast<std::int32_t>(std::floor(position.z))});
+    }
+    return spawnChunk;
+}
+
+void IntegratedServer::trySpawn(const world::World& world, ServerPlayer& player) const
+{
+    if (const std::optional<glm::dvec3> feet = findSpawn(world, m_config.spawnColumn, player.tuning())) {
+        player.spawn(*feet);
+        core::logInfo("server", "Player spawned at ({:.2f}, {:.2f}, {:.2f})", feet->x, feet->y, feet->z);
     }
 }
 

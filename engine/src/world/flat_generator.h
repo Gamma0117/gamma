@@ -11,8 +11,9 @@ struct FlatPreset;
 
 namespace aurora::world {
 
-// The flat world: `preset` layers stacked from core::kWorldMinY up, air above. The same for every position, so the
-// result depends on nothing but its inputs. A section covered by a single layer is stored as one state (0 bits).
+// The flat world: `preset` layers stacked from core::kWorldMinY up, air above, then the preset's boxes (only their
+// part inside this chunk, in file order). The result depends on nothing but its inputs. A section covered by a
+// single layer is stored as one state (0 bits). The height map is built last, so it sees carved boxes.
 std::unique_ptr<Chunk> generateFlatChunk(const data::FlatPreset& preset, ChunkPos pos);
 
 // A generator that keeps `preset` alive for as long as any copy of it (including queued jobs) exists.

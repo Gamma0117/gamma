@@ -70,3 +70,25 @@ TEST_CASE("Movement keys reach the camera only while captured and the UI does no
     cursor.onEscape();
     CHECK_FALSE(cursor.acceptsMovement(false));
 }
+
+TEST_CASE("A release is reported once even when the mouse is captured again", "[client][cursor]")
+{
+    CursorController cursor;
+    CHECK_FALSE(cursor.takeReleased());
+    cursor.onClick(false);
+    CHECK_FALSE(cursor.takeReleased()); // Capturing is not a release.
+    cursor.onEscape();
+    cursor.onClick(false); // Captured again in the same poll.
+    CHECK(cursor.captured());
+    CHECK(cursor.takeReleased());
+    CHECK_FALSE(cursor.takeReleased());
+
+    cursor.onEscape();
+    cursor.onEscape(); // Already released: still one release.
+    CHECK(cursor.takeReleased());
+    cursor.onFocusChanged(false); // Not captured: nothing to release.
+    CHECK_FALSE(cursor.takeReleased());
+    cursor.onClick(false);
+    cursor.onFocusChanged(false);
+    CHECK(cursor.takeReleased());
+}

@@ -55,7 +55,9 @@ add_library(aurora_data STATIC
     src/data/game_directory.cpp
     src/data/json_support.cpp
     src/data/load_issue.cpp
+    src/data/pack_files.cpp
     src/data/path_probe.cpp
+    src/data/player_movement.cpp
     src/data/resource_id.cpp
 )
 add_library(aurora::data ALIAS aurora_data)
@@ -79,25 +81,43 @@ add_library(aurora::world ALIAS aurora_world)
 target_link_libraries(aurora_world PUBLIC aurora::data)
 aurora_set_warnings(aurora_world)
 
-# client: the client's copy of the world (snapshots from the server), what to mesh and when, the camera and who
-# owns the mouse. CPU only: no window or GL here, so all of it is tested without a context.
+# entity: what moves in the world. Collision boxes against the block grid and the player's movement step, shared by
+# the server (authoritative) and the client (prediction). Plain data and functions; no threads, no rendering.
+add_library(aurora_entity STATIC
+    src/entity/aabb.cpp
+    src/entity/collision.cpp
+    src/entity/collision_shapes.cpp
+    src/entity/player_movement.cpp
+)
+add_library(aurora::entity ALIAS aurora_entity)
+target_link_libraries(aurora_entity PUBLIC aurora::world glm::glm)
+aurora_set_warnings(aurora_entity)
+
+# client: the client's copy of the world (snapshots from the server), what to mesh and when, the camera, who owns
+# the mouse, and the local player's input and prediction. CPU only: no window or GL here, so all of it is tested
+# without a context.
 add_library(aurora_client STATIC
     src/client/camera.cpp
+    src/client/client_collision_view.cpp
     src/client/client_world.cpp
     src/client/cursor_controller.cpp
     src/client/frustum.cpp
+    src/client/local_player.cpp
     src/client/mesh_scheduler.cpp
+    src/client/movement_sampler.cpp
 )
 add_library(aurora::client ALIAS aurora_client)
-target_link_libraries(aurora_client PUBLIC aurora::world glm::glm)
+target_link_libraries(aurora_client PUBLIC aurora::entity)
 aurora_set_warnings(aurora_client)
 
 # server: authoritative simulation on its own fixed-rate thread. Knows nothing about render or ui.
 add_library(aurora_server STATIC
     src/server/integrated_server.cpp
+    src/server/server_player.cpp
+    src/server/world_collision_view.cpp
 )
 add_library(aurora::server ALIAS aurora_server)
-target_link_libraries(aurora_server PUBLIC aurora::world)
+target_link_libraries(aurora_server PUBLIC aurora::entity)
 aurora_set_warnings(aurora_server)
 
 # render_mesh: the CPU half of rendering. Turns sections into vertex data on worker threads; no GL, so it is tested

@@ -1,5 +1,6 @@
 #include "core/tick_scheduler.h"
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <chrono>
@@ -122,4 +123,29 @@ TEST_CASE("reset starts a new schedule", "[core][tick]")
     CHECK(scheduler.nextTickTime() == restart);
     CHECK(scheduler.advance(restart).ticksToRun == 1);
     CHECK(scheduler.nextTickTime() == restart + kInterval);
+}
+
+TEST_CASE("Progress through the current interval for drawing between ticks", "[core][tick]")
+{
+    TickScheduler scheduler(kInterval, 3);
+    scheduler.reset(kStart);
+    CHECK(scheduler.progress(kStart) == 1.0); // The first tick is due now.
+    scheduler.advance(kStart);
+    CHECK(scheduler.progress(kStart) == 0.0); // It just ran.
+    CHECK(scheduler.progress(kStart + 25ms) == Catch::Approx(0.5));
+    CHECK(scheduler.progress(kStart + 49ms) == Catch::Approx(0.98));
+    CHECK(scheduler.progress(kStart + 80ms) == 1.0); // Late: held at the end until the next tick runs.
+    CHECK(scheduler.progress(kStart - 10ms) == 0.0);
+}
+
+TEST_CASE("Past the catch-up limit only one tick runs (the client's limit of 3)", "[core][tick]")
+{
+    TickScheduler scheduler(kInterval, 3);
+    scheduler.reset(kStart);
+    scheduler.advance(kStart);
+    CHECK(scheduler.advance(kStart + 150ms).ticksToRun == 3); // Three due: all run.
+    const TickScheduler::Advance late = scheduler.advance(kStart + 350ms); // Four due.
+    CHECK(late.ticksToRun == 1);
+    CHECK(late.ticksSkipped == 3);
+    CHECK(scheduler.nextTickTime() == kStart + 400ms);
 }

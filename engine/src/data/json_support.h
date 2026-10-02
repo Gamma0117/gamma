@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <filesystem>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -75,5 +76,9 @@ std::optional<std::string> readFile(const std::filesystem::path& file, FileIssue
 std::optional<Json> parseJson(const std::string& text, FileIssues& issues);
 
 std::optional<bool> readBool(const Json& value, const std::string& pointer, FileIssues& issues);
+
+// A warning for every key of `object` (at `pointer`) that is not in `known`: probably a typo.
+void warnUnknownFields(const Json& object, std::span<const std::string_view> known, const std::string& pointer,
+                       FileIssues& issues);
 
 } // namespace aurora::data::json

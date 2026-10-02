@@ -163,4 +163,14 @@ std::optional<bool> readBool(const Json& value, const std::string& pointer, File
     return value.get<bool>();
 }
 
+void warnUnknownFields(const Json& object, std::span<const std::string_view> known, const std::string& pointer,
+                       FileIssues& issues)
+{
+    for (const auto& [key, value] : object.items()) {
+        if (std::ranges::find(known, key) == known.end()) {
+            issues.warning(childPointer(pointer, key), std::format("unknown field '{}' (ignored)", key));
+        }
+    }
+}
+
 } // namespace aurora::data::json

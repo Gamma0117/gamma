@@ -1,5 +1,6 @@
 #pragma once
 
+#include "client/local_player.h"
 #include "client/mesh_scheduler.h"
 #include "render/chunk_renderer.h"
 #include "server/server_stats.h"
@@ -43,6 +44,15 @@ struct DebugOverlayData {
     client::MeshSchedulerStats meshes;
     render::ChunkRenderStats gpu;
     bool cursorCaptured = false;
+
+    // The local player as predicted (null without one) and whether the camera flies free of it.
+    const client::LocalPlayer* player = nullptr;
+    bool freeFlight = false;
+};
+
+// What the user did on the panel this frame.
+struct DebugOverlayActions {
+    bool toggleFreeFlight = false;
 };
 
 // F3 debug screen: a translucent panel in the top-left corner with frame timing, server ticks, workers,
@@ -53,8 +63,10 @@ public:
     void setVisible(bool visible) { m_visible = visible; }
     void toggle() { m_visible = !m_visible; }
 
-    // Call between ImGuiLayer::beginFrame and endFrame. Takes the window for the VSync toggle.
-    void draw(platform::Window& window, const render::Renderer& renderer, const DebugOverlayData& data) const;
+    // Call between ImGuiLayer::beginFrame and endFrame. Takes the window for the VSync toggle. The caller acts on
+    // the returned actions at once (switching free flight on must stop player input in the same frame).
+    DebugOverlayActions draw(platform::Window& window, const render::Renderer& renderer,
+                             const DebugOverlayData& data) const;
 
 private:
     bool m_visible = false;

@@ -9,6 +9,7 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <cmath>
 #include <format>
 #include <string>
 
@@ -91,6 +92,34 @@ void drawWorldSection(const DebugOverlayData& data)
                                                   : "Click the world to capture the mouse");
 }
 
+void drawPlayerSection(const DebugOverlayData& data, DebugOverlayActions& actions)
+{
+    bool freeFlight = data.freeFlight;
+    if (ImGui::Checkbox("Free-flying camera (debug)", &freeFlight)) {
+        actions.toggleFreeFlight = true;
+    }
+    if (data.player == nullptr || !data.player->spawned()) {
+        ImGui::TextUnformatted("Player: waiting for the spawn");
+        return;
+    }
+    const entity::PlayerMotion& motion = data.player->current();
+    const client::LocalPlayerStats stats = data.player->stats();
+    ImGui::Text("Player %.3f / %.3f / %.3f%s", motion.position.x, motion.position.y, motion.position.z,
+                stats.frozen ? "  FROZEN (chunk not loaded)" : "");
+    ImGui::Text("  speed %.2f b/s, vertical %.2f, %s", std::hypot(motion.velocity.x, motion.velocity.z),
+                motion.velocity.y, motion.onGround ? "on ground" : "in the air");
+    ImGui::Text("  inputs sent %u, settled %u, unsettled %zu%s%s", stats.lastSent, stats.lastInput, stats.history,
+                stats.paused ? " PAUSED" : "", stats.resyncing ? " RESYNC" : "");
+    ImGui::Text("  corrections %llu, pauses %llu, resyncs %llu", static_cast<unsigned long long>(stats.corrections),
+                static_cast<unsigned long long>(stats.inputPauses), static_cast<unsigned long long>(stats.resyncs));
+    const server::ServerPlayerStats& server = data.server.player;
+    ImGui::Text("  server: waiting %zu, starved %llu, filling %llu, dropped %llu, late %llu", server.pendingInputs,
+                static_cast<unsigned long long>(server.starvedTicks),
+                static_cast<unsigned long long>(server.primingTicks),
+                static_cast<unsigned long long>(server.droppedInputs),
+                static_cast<unsigned long long>(server.staleInputs));
+}
+
 void drawSystemSection(platform::Window& window, const render::Renderer& renderer)
 {
     ImGui::Text("Window %d x %d", window.framebufferWidth(), window.framebufferHeight());
@@ -110,11 +139,12 @@ void drawSystemSection(platform::Window& window, const render::Renderer& rendere
 
 } // namespace
 
-void DebugOverlay::draw(platform::Window& window, const render::Renderer& renderer,
-                        const DebugOverlayData& data) const
+DebugOverlayActions DebugOverlay::draw(platform::Window& window, const render::Renderer& renderer,
+                                       const DebugOverlayData& data) const
 {
+    DebugOverlayActions actions;
     if (!m_visible) {
-        return;
+        return actions;
     }
     AURORA_PROFILE_ZONE_N("Debug overlay");
 
@@ -137,10 +167,13 @@ void DebugOverlay::draw(platform::Window& window, const render::Renderer& render
         ImGui::Separator();
         drawWorldSection(data);
         ImGui::Separator();
+        drawPlayerSection(data, actions);
+        ImGui::Separator();
         drawSystemSection(window, renderer);
         ImGui::TextDisabled("F3: hide");
     }
     ImGui::End();
+    return actions;
 }
 
 } // namespace aurora::ui

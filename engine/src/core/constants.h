@@ -12,6 +12,9 @@ inline constexpr double kSecondsPerTick = 1.0 / kTicksPerSecond;
 inline constexpr std::chrono::milliseconds kTickInterval{1000 / kTicksPerSecond};
 // If more ticks than this are due at once (the loop is 2 s or more behind), the backlog is dropped.
 inline constexpr std::uint32_t kMaxCatchUpTicks = kTicksPerSecond * 2;
+// The client's prediction ticks at the same rate. Up to this many missed ticks are made up in one frame (slow
+// frames); after a longer stall only one runs, since the server went on without those inputs meanwhile.
+inline constexpr std::uint32_t kMaxClientCatchUpTicks = 3;
 
 // Section = 16x16x16 blocks.
 inline constexpr std::int32_t kSectionSize = 16;

@@ -1,0 +1,15 @@
+{
+  "width": 0.6,
+  "height": 1.8,
+  "eye_height": 1.62,
+  "sneak_eye_height": 1.27,
+  "step_height": 2.5,
+  "gravity": 32,
+  "terminal_velocity": 78,
+  "jump_velocity": 9.8,
+  "walk_speed": "fast",
+  "sprint_speed": 5.6,
+  "sneak_speed": 1.3,
+  "ground_acceleration": 0.5,
+  "air_acceleration": 0.05
+}

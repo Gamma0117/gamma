@@ -4,6 +4,7 @@
 #include "server/integrated_server.h"
 
 #include "../data/data_test_support.h"
+#include "../entity/entity_test_support.h"
 #include "../world/world_test_support.h"
 
 #include <catch2/catch_test_macros.hpp>
@@ -15,6 +16,7 @@
 #include <cstdint>
 #include <functional>
 #include <iterator>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <stdexcept>
@@ -288,7 +290,7 @@ TEST_CASE("Chunk updates follow the view center in order", "[server]")
             ->generation;
 
     // Far away: the nine old chunks are announced as unloaded (keep radius 2 is exceeded), nine new ones loaded.
-    server.setViewCenter(ChunkPos{10, 0});
+    server.setViewCenterOverride(ChunkPos{10, 0});
     REQUIRE(collectUntil([&] { return count(ChunkUpdate::Kind::Loaded) == 18; }));
     CHECK(count(ChunkUpdate::Kind::Unloaded) == 9);
     // Indices, not iterators: collecting more updates may reallocate the vector.
@@ -307,7 +309,7 @@ TEST_CASE("Chunk updates follow the view center in order", "[server]")
     CHECK_FALSE(updates[*unloadOrigin].snapshot);
 
     // Back again: the origin loads anew with a larger generation, after its unload.
-    server.setViewCenter(ChunkPos{0, 0});
+    server.setViewCenterOverride(ChunkPos{0, 0});
     REQUIRE(collectUntil([&] { return count(ChunkUpdate::Kind::Loaded) == 27; }));
     const std::optional<std::size_t> reload = indexOf(ChunkUpdate::Kind::Loaded, true);
     REQUIRE(reload);
@@ -337,4 +339,88 @@ TEST_CASE("A server whose jobs are refused still runs and stops", "[server]")
     CHECK(stats.running);
     server.stop();
     CHECK(server.stats().error.empty());
+}
+
+namespace {
+
+std::shared_ptr<const aurora::data::PlayerMovementTuning> testMovement()
+{
+    return std::make_shared<const aurora::data::PlayerMovementTuning>(aurora::test::standardTuning());
+}
+
+// Polls takePlayerState() until a state arrives (10 s hang guard).
+std::optional<aurora::entity::PlayerState> waitForPlayerState(IntegratedServer& server)
+{
+    const Clock::time_point deadline = Clock::now() + 10s;
+    while (Clock::now() < deadline) {
+        if (std::optional<aurora::entity::PlayerState> state = server.takePlayerState()) {
+            return state;
+        }
+        std::this_thread::sleep_for(1ms);
+    }
+    return std::nullopt;
+}
+
+} // namespace
+
+TEST_CASE("The local player spawns on the surface and freezes while its chunk is away", "[server][player]")
+{
+    using aurora::world::ChunkPos;
+    const auto registry = aurora::test::makeTestRegistry();
+    aurora::core::JobSystem jobs(2);
+    IntegratedServer server(ServerConfig{.jobs = &jobs,
+                                         .blocks = registry,
+                                         .flatPreset = aurora::test::makeStandardFlatPreset(*registry),
+                                         .playerMovement = testMovement(),
+                                         .loadRadius = 1});
+    // Before the spawn the spawn area loads whatever the client asks for.
+    server.setViewCenterOverride(ChunkPos{50, 50});
+    REQUIRE(server.start());
+    CHECK(server.stats().hasPlayer);
+
+    const std::optional<aurora::entity::PlayerState> state = waitForPlayerState(server);
+    REQUIRE(state);
+    CHECK(state->motion.position == glm::dvec3(0.5, 64.0, 0.5));
+    CHECK(state->lastInput == 0);
+    CHECK(server.stats().player.spawned);
+
+    // After the spawn the override decides: the player's chunk is unloaded and it freezes (rule B)...
+    REQUIRE(waitForStats(server, [](const ServerStats& stats) { return stats.player.frozen; }));
+    // ...and moves again once its chunk is back.
+    server.setViewCenterOverride(std::nullopt);
+    REQUIRE(waitForStats(server, [](const ServerStats& stats) { return !stats.player.frozen; }));
+    const std::optional<aurora::entity::PlayerState> after = waitForPlayerState(server);
+    REQUIRE(after);
+    CHECK(after->motion.position == glm::dvec3(0.5, 64.0, 0.5));
+    CHECK(after->serverTick > state->serverTick);
+    server.stop();
+}
+
+TEST_CASE("The load center follows the player", "[server][player]")
+{
+    using aurora::world::ChunkPos;
+    using aurora::world::ChunkUpdate;
+    const auto registry = aurora::test::makeTestRegistry();
+    aurora::core::JobSystem jobs(2);
+    IntegratedServer server(ServerConfig{.jobs = &jobs,
+                                         .blocks = registry,
+                                         .flatPreset = aurora::test::makeStandardFlatPreset(*registry),
+                                         .playerMovement = testMovement(),
+                                         .loadRadius = 1,
+                                         .spawnColumn = {15, 0}});
+    REQUIRE(server.start());
+    REQUIRE(waitForPlayerState(server));
+
+    // Walk east over the border into chunk (1, 0): chunk (2, 0) comes into range.
+    bool loadedEast = false;
+    const Clock::time_point deadline = Clock::now() + 10s;
+    for (std::uint32_t sequence = 1; !loadedEast && Clock::now() < deadline; ++sequence) {
+        server.sendPlayerInput({sequence, {.forward = 1, .yaw = 90.0f}});
+        for (const ChunkUpdate& update : server.takeChunkUpdates()) {
+            loadedEast = loadedEast || (update.kind == ChunkUpdate::Kind::Loaded && update.pos == ChunkPos{2, 0});
+        }
+        std::this_thread::sleep_for(50ms);
+    }
+    CHECK(loadedEast);
+    server.stop();
 }

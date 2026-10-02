@@ -42,6 +42,7 @@ glm::dvec2 CursorController::takeLookDelta()
 void CursorController::setCaptured(bool captured)
 {
     if (captured != m_captured) {
+        m_released = m_released || !captured;
         m_captured = captured;
         forgetCursor();
     }

@@ -4,6 +4,8 @@
 #include "data/block_registry.h"
 #include "data/load_issue.h"
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
@@ -17,9 +19,23 @@ struct FlatLayer {
     std::uint32_t height = 0;
 };
 
-// Layers stacked from the bottom of the world (core::kWorldMinY) upwards; everything above them is air.
+// A box of one state, filled after the layers. Block coordinates, both corners included; from <= to on every
+// axis (x, y, z).
+struct FlatBox {
+    BlockStateId state = kAirState;
+    std::array<std::int32_t, 3> from{};
+    std::array<std::int32_t, 3> to{};
+};
+
+inline constexpr std::size_t kMaxFlatBoxes = 256;
+// Horizontal limit of box coordinates (the planned world border).
+inline constexpr std::int32_t kMaxFlatBoxCoordinate = 30'000'000;
+
+// Layers stacked from the bottom of the world (core::kWorldMinY) upwards; everything above them is air. Then the
+// boxes, in file order: a later box wins where boxes overlap, and an air box carves.
 struct FlatPreset {
     std::vector<FlatLayer> layers;
+    std::vector<FlatBox> boxes;
 
     std::uint32_t totalHeight() const;
 };
@@ -36,6 +52,9 @@ struct FlatPresetLoadResult {
 // - "block" is parsed strictly against `registry`: "aurora:oak_log" is its default state, "aurora:oak_log[axis=x]"
 //   a given one. An unknown block is an error, never the unknown placeholder.
 // - The heights must fit in the world (core::kWorldHeight); each one is checked against what is left before adding.
+// - "boxes" (optional): at most kMaxFlatBoxes {"block": state string, "from": [x, y, z], "to": [x, y, z]}. Whole
+//   numbers only (2.0 and 1e3 are errors), x and z within +-kMaxFlatBoxCoordinate, y inside the world height,
+//   from <= to on every axis. "block" is parsed as strictly as a layer's.
 // The file must exist. Every problem is collected as a LoadIssue.
 FlatPresetLoadResult loadFlatPreset(std::span<const DataPack> packs, const BlockRegistry& registry);
 

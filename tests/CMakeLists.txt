@@ -14,7 +14,12 @@ add_executable(aurora_tests
     client/camera_tests.cpp
     client/client_world_tests.cpp
     client/cursor_controller_tests.cpp
+    client/local_player_tests.cpp
+    client/loop_simulation_tests.cpp
     client/mesh_scheduler_tests.cpp
+    client/movement_sampler_tests.cpp
+    client/player_input_loop_tests.cpp
+    client/player_integration_tests.cpp
     core/job_system_tests.cpp
     core/log_tests.cpp
     core/sanity_tests.cpp
@@ -26,12 +31,17 @@ add_executable(aurora_tests
     data/flat_preset_tests.cpp
     data/game_directory_tests.cpp
     data/path_probe_tests.cpp
+    data/player_movement_tests.cpp
     data/resource_id_tests.cpp
+    entity/collision_tests.cpp
+    entity/player_movement_tests.cpp
     platform/input_state_tests.cpp
     render/chunk_mesher_tests.cpp
     render/mesh_pipeline_tests.cpp
     render/upload_queue_tests.cpp
     server/integrated_server_tests.cpp
+    server/player_physics_tests.cpp
+    server/server_player_tests.cpp
     support/png_test_support.cpp
     world/chunk_section_tests.cpp
     world/chunk_tests.cpp
@@ -40,7 +50,8 @@ add_executable(aurora_tests
     world/world_tests.cpp
 )
 # CPU libraries only: no test needs a window or a GL context.
-target_link_libraries(aurora_tests PRIVATE aurora::core aurora::data aurora::world aurora::client aurora::render_mesh
+target_link_libraries(aurora_tests PRIVATE aurora::core aurora::data aurora::world aurora::entity aurora::client
+                                           aurora::render_mesh
                                            aurora::server Catch2::Catch2WithMain)
 target_include_directories(aurora_tests SYSTEM PRIVATE "${Stb_INCLUDE_DIR}")
 # The shipped game data is loaded by a test. UTF-8 literal for non-ASCII checkout paths on Windows.
@@ -83,7 +94,15 @@ add_test(NAME app_texture_errors
             "-DEXPECT2=dirt.png: a block texture must be 32x32 pixels, this one is 16x16"
             "-DEXPECT3=Block textures have 2 error\\(s\\)"
             "-DFORBID=GLFW|Window|OpenGL|Server" -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/run_app.cmake")
-set_tests_properties(app_game_dir_missing app_data_errors app_preset_errors app_texture_errors
+# Valid blocks, textures and preset but broken player movement settings: the same early exit.
+add_test(NAME app_movement_errors
+    COMMAND "${CMAKE_COMMAND}" -DAPP=$<TARGET_FILE:aurora>
+            "-DGAME_DIR=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bad_movement_game" -DEXPECT_EXIT=1 -DNO_DISPLAY=ON
+            "-DEXPECT1=movement.json /walk_speed: expected a number in \\[0, 50\\], got string \"fast\""
+            "-DEXPECT2=movement.json /step_height: must be below height \\(1.8\\): got 2.5"
+            "-DEXPECT3=The player movement settings have 2 error\\(s\\)"
+            "-DFORBID=GLFW|Window|OpenGL|Server" -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/run_app.cmake")
+set_tests_properties(app_game_dir_missing app_data_errors app_preset_errors app_texture_errors app_movement_errors
                      PROPERTIES LABELS app TIMEOUT 60)
 
 # Broken links (made at test time; symlinks in git are unreliable on Windows) must stop the start like any other

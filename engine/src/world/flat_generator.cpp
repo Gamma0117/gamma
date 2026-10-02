@@ -56,6 +56,29 @@ std::unique_ptr<Chunk> generateFlatChunk(const data::FlatPreset& preset, ChunkPo
         chunk->setSection(index, std::move(section));
     }
 
+    // The boxes, in order: only the part inside this chunk. Corners and lengths in 64 bits, so boxes near the
+    // coordinate limits cannot overflow.
+    const std::int64_t originX = chunkOrigin(pos.x);
+    const std::int64_t originZ = chunkOrigin(pos.z);
+    for (const data::FlatBox& box : preset.boxes) {
+        const std::int64_t fromX = std::max<std::int64_t>(box.from[0], originX);
+        const std::int64_t toX = std::min<std::int64_t>(box.to[0], originX + core::kSectionSize - 1);
+        const std::int64_t fromZ = std::max<std::int64_t>(box.from[2], originZ);
+        const std::int64_t toZ = std::min<std::int64_t>(box.to[2], originZ + core::kSectionSize - 1);
+        if (fromX > toX || fromZ > toZ) {
+            continue;
+        }
+        for (std::int64_t y = box.from[1]; y <= box.to[1]; ++y) {
+            for (std::int64_t z = fromZ; z <= toZ; ++z) {
+                for (std::int64_t x = fromX; x <= toX; ++x) {
+                    chunk->setBlock(static_cast<std::int32_t>(x - originX), static_cast<std::int32_t>(y),
+                                    static_cast<std::int32_t>(z - originZ), box.state);
+                }
+            }
+        }
+    }
+
+    // After the boxes, so carved air counts too.
     chunk->rebuildHeightMap();
     chunk->setStatus(ChunkStatus::Generated);
     return chunk;

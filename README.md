@@ -54,13 +54,15 @@
 6. **시작 항목 고르기.** 도구 모음의 초록색 ▶ 버튼 옆 드롭다운("시작 항목 선택")에서 **aurora.exe**를 고른다.
 7. **실행.** `F5`(디버거 연결) 또는 `Ctrl+F5`(디버거 없이 실행).
 8. **보여야 하는 것**
-   - "Aurora" 창(1280×720)이 뜨고, 1초쯤 안에 어두운 남색 하늘 아래 풀이 덮인 평지가 보인다. 카메라는 y 80 높이에서 북쪽을 약간 내려다본다. 그려지는 범위는 카메라 둘레 반경 8청크(17×17)이고, 그 너머는 하늘색이다.
-   - **조작** (P0-5는 자유 비행 카메라)
+   - "Aurora" 창(1280×720)이 뜨고, 1초쯤 안에 어두운 남색 하늘 아래 풀이 덮인 평지가 보인다. 처음 잠깐은 y 80 높이에서 내려다보다가, 플레이어가 생기면(콘솔 `Player spawned at (0.50, 64.00, 0.50)`) 플레이어의 눈 높이(y 65.62)로 내려와 북쪽을 약간 내려다본다. 그려지는 범위는 반경 8청크(17×17)이고, 그 너머는 하늘색이다.
+   - **조작** (P0-6: 플레이어가 걷는다. 서버가 위치를 정하고, 화면은 그것을 미리 계산해 보여준다)
      - 창 안의 지형을 **클릭**하면 마우스가 잡힌다(커서가 사라짐). F3 화면 위를 클릭하면 잡히지 않는다.
-     - 마우스로 둘러보고, **W A S D**로 바라보는 방향 기준 수평 이동, **Space**·**Shift**로 위아래로 움직인다. **Ctrl**을 누르고 있으면 4배 빠르다(초당 10블록 → 40블록).
-     - **Esc**를 누르면 마우스가 풀린다. 아직 메뉴·일시정지가 아니라서 서버는 계속 돈다. 창을 다른 곳으로 전환해도 풀린다.
-     - 창을 닫으려면 창의 X 버튼을 누른다. P0-4까지는 Esc로 닫혔지만 이제 Esc는 마우스를 놓는 키다.
-     - 멀리 날아가면 앞쪽에 새 청크가 생기고 지나온 쪽은 내려간다.
+     - 마우스로 둘러보고, **W A S D**로 걷는다(초당 4.3블록). **Ctrl**을 누른 채 앞으로 가면 달린다(5.6). **Shift**는 웅크리기(1.3, 눈 높이가 조금 낮아짐). **Space**는 점프(약 1.26블록, 누르고 있으면 착지할 때마다 다시 뛴다).
+     - 한 칸 높이의 블록은 점프해서 오른다. 두 칸 벽은 넘지 못한다. 0.6블록 이하의 턱(반블록·계단)은 걸어서 저절로 오르지만, 그런 블록은 아직 없어 화면에서는 볼 수 없다(테스트로 확인했고, 부분 블록 작업에서 화면으로 확인한다).
+     - **Esc**를 누르면 마우스가 풀리고 플레이어는 멈춘다(공중이었다면 떨어져 착지). 다른 창으로 전환하거나 최소화해도 같다. 아직 메뉴·일시정지가 아니라서 서버는 계속 돈다.
+     - **자유 비행(디버그)**: Esc로 마우스를 놓고 F3 화면의 `Free-flying camera (debug)`를 체크한 뒤, 지형을 클릭해 다시 잡는다. P0-5처럼 날아다닌다(Space·Shift 위아래, Ctrl 4배). 플레이어는 그 자리에 서 있고, 체크를 풀면 카메라가 플레이어 눈으로 돌아온다. 아주 멀리 날아가면 플레이어가 있는 청크가 내려가 F3에 `FROZEN`이 뜨고, 체크를 풀면 다시 불러와 풀린다.
+     - **시험 코스**: 시작 위치에서 뒤로 돌아(남쪽) 몇 걸음 가면 있다. 조약돌 계단 3단(x 0~2, 점프로 한 칸씩), 판자 두 칸 벽(x 5~7, 넘지 못함), 높이 두 칸 통로(x −5, 그냥 지나감), 두 칸 깊이 구덩이(x 9~11, 안쪽 디딤돌을 밟고 점프해 나옴).
+     - 창을 닫으려면 창의 X 버튼을 누른다.
    - **F3**을 누르면 왼쪽 위에 반투명 디버그 화면이 뜬다.
      - FPS와 프레임 시간(평균, 최근 240프레임의 최소·최대), CPU 시간, 프레임 시간 그래프. 모니터가 60Hz면 약 60 FPS / 16.7 ms, 120Hz면 약 120 FPS / 8.3 ms
      - `Server 20.0 TPS`와 틱 시간·틱 번호·건너뛴 틱(`skipped 0`). 서버는 렌더와 별도 스레드에서 초당 20틱으로 돈다
@@ -70,12 +72,13 @@
      - `Meshes 289 done, … empty, 0 waiting, 0 in flight, 0 failed`: 섹션 메시 상태. 평지는 청크마다 지표 섹션 하나에 면이 있고, 땅속 섹션은 면이 없어서 `empty`다
      - `GPU 289 sections, 1156 vertices, … MB, 0 to upload`와 `drawn N sections in N calls`: GPU에 올라간 메시와, 카메라 시야(절두체) 안이라 실제로 그린 섹션 수
      - 마지막 줄: 마우스가 잡혔는지(`Mouse captured (Esc releases)`) 아닌지
+     - `Free-flying camera (debug)` 체크박스와 `Player …`: 플레이어 발 위치, 수평 속도(걷기 4.30, 달리기 5.60)·수직 속도, 땅에 있는지. `inputs sent / settled / unsettled`: 보낸 입력 수, 서버가 처리를 끝낸 번호, 아직 처리되지 않은 입력 수(보통 1~3). `corrections`(서버 결과로 위치를 고친 횟수, 보통 0이고 포커스를 잃는 순간 1 정도 늘 수 있음), `pauses`·`resyncs`(서버가 멈췄을 때만 늘어남). `server: waiting … starved … filling … dropped … late …`: 서버 쪽 입력 대기열 상태(평소 `starved 1, filling 1, dropped 0, late 0`)
      - `Workers N`: 워커 스레드 수(논리 프로세서 수 − 2, 최소 1)
      - `Blocks 8 (10 states)`: 읽어 들인 블록 수(내장 공기·unknown 포함)와 블록 상태 수
      - 창 크기, VSync 체크박스(끄면 FPS가 크게 오르지만 서버는 20 TPS 그대로), OpenGL 버전(`4.5` 이상, Core Profile), GPU 이름, Tracy 상태
    - F3을 다시 누르면 사라진다. 누르고 있어도 한 번만 바뀐다.
    - 창 가장자리를 끌어 크기를 바꿔도 배경이 늘어나거나 깨지지 않고, 디버그 화면의 창 크기가 바뀐다.
-   - 콘솔에 `Loaded 8 block textures (32x32 PNG)`, `Flat world preset: 3 layers, 128 blocks high (top layer ends at y 63)`와, 잠시 뒤 `Spawn area ready after … ms: 361 chunks loaded, 0 failed`가 찍힌다.
+   - 콘솔에 `Loaded 8 block textures (32x32 PNG)`, `Flat world preset: 3 layers, 128 blocks high (top layer ends at y 63), 9 boxes`, `Player movement: 0.6 x 1.8 blocks, walk 4.3 / sprint 5.6 / sneak 1.3 blocks per second`, `Player spawned at (0.50, 64.00, 0.50)`와 `Spawn area ready after … ms: 361 chunks loaded, 0 failed`가 찍힌다.
    - 창의 X 버튼으로 닫으면 콘솔에 `[INFO ] [app] (Main) N frames, avg … ms/frame`과 `Server thread stopped: … last measured 20.0x TPS` 같은 로그가 찍히고, 마지막 줄은 `Exiting with code 0`이다.
 
 ### 게임 데이터 (블록 JSON, 텍스처, 평지 프리셋, 쉐이더)
@@ -83,7 +86,8 @@
 - 블록 정의는 `game/data/aurora/blocks/*.json`에 있다. 형식은 `docs/15_data_files.md`의 "블록 파일".
 - 블록 텍스처는 `game/assets/aurora/textures/block/*.png`이고 32×32 PNG여야 한다. 창을 띄우기 전에 모두 읽어 검사한다.
 - 청크 쉐이더는 `game/assets/aurora/shaders/chunk.vert`, `chunk.frag`이다(시작할 때 읽는다. 실행 중 다시 읽기는 P0-10).
-- 평지 월드의 층 구성은 `game/data/aurora/worldgen/flat.json`에 있다(돌 124층, 흙 3층, 풀 1층). 형식은 같은 문서의 "평지 프리셋".
+- 평지 월드의 층 구성은 `game/data/aurora/worldgen/flat.json`에 있다(돌 124층, 흙 3층, 풀 1층, 그 위에 시험 코스 상자들). 형식은 같은 문서의 "평지 프리셋".
+- 플레이어의 크기·속도·점프·중력은 `game/data/aurora/player/movement.json`에 있다. 형식은 같은 문서의 "플레이어 이동".
 - 게임은 시작할 때 `./game`(실행 폴더), 없으면 저장소의 `game` 폴더를 읽는다. 다른 폴더를 쓰려면 `--game-dir <폴더>`를 준다(VS에서는 `launch.vs.json`의 `args`). 이때는 그 폴더만 쓴다.
 - 파일이 틀리면 로그에 **파일 경로, 필드, 이유**가 줄마다 나오고, 창을 띄우지 않고 종료 코드 1로 끝난다. 예:
   ```

@@ -11,6 +11,7 @@ game/
     buildings/ jobs/ traits/ laws/ monsters/ bosses/ loot/
     factions/ events/ biomes/ structures/ vehicles/ parts/
     worldgen/                ← 월드 생성 설정 (P0-4: flat.json)
+    player/                  ← 플레이어 설정 (P0-6: movement.json)
   assets/aurora/
     textures/{block,item,entity,particle,ui}/
     models/ animations/ sounds/ shaders/ lang/
@@ -68,8 +69,56 @@ game/
 | `layers[].height` | 예 | 1 이상의 정수. `0`, 음수, 소수(`2.0`, `1e3` 포함), 문자열, `true`는 오류 |
 
 - 높이는 더하기 전에 남은 월드 높이와 비교한다. 합이 384(월드 전체 높이)까지는 되고, 넘으면 넘친 층의 `/layers/<n>/height`에 오류를 낸다.
+- `boxes` (선택, P0-6): 층을 쌓은 뒤 채울 상자 목록. 시험 코스처럼 평지 위에 간단한 지형을 놓는 데 쓴다.
+
+  ```json
+  "boxes": [
+    { "block": "aurora:cobblestone", "from": [0, 64, 5], "to": [2, 64, 7] },
+    { "block": "aurora:air", "from": [9, 62, 5], "to": [11, 63, 7] }
+  ]
+  ```
+
+  | 필드 | 필수 | 형식 |
+  | --- | --- | --- |
+  | `boxes[].block` | 예 | 상태 문자열. 층의 `block`과 같은 규칙. `aurora:air`로 파낼 수 있다 |
+  | `boxes[].from`, `boxes[].to` | 예 | `[x, y, z]` 정수 세 개, 양 끝 포함. x·z는 ±30,000,000 안, y는 −64~319. 축마다 from ≤ to |
+
+  - 최대 256개. JSON 순서대로 채우고, 겹치면 뒤 상자가 이긴다. `2.0`, `1e3` 같은 실수 표기는 오류다.
+  - 생성기는 각 청크에 해당하는 부분만 채우고(교집합·끝 좌표·길이는 64비트로 계산), 모두 채운 뒤 높이맵을 다시 계산한다.
+  - 기본 `flat.json`은 스폰 남쪽(z 5~9)에 시험 코스를 둔다: 조약돌 계단 3단, 판자 두 칸 벽, 높이 두 칸 통로, 두 칸 깊이 구덩이(안쪽 디딤돌). 스폰 기둥 (0, 0)과 북쪽 시야(시작 화면)는 비워 둔다.
 - 기본 구성은 돌 y −64\~59, 흙 60\~62, 풀 63이다. 지표 위 첫 빈 칸은 64다. 기반암 블록은 아직 없어서 넣지 않았다.
 - 문법 오류·중복 키·필드 누락은 오류, 모르는 필드는 경고다. 블록 파일과 같이 오류가 하나라도 있으면 창을 만들기 전에 종료 코드 1로 끝낸다.
+
+## 플레이어 이동 (`player/movement.json`, P0-6)
+
+플레이어의 크기와 움직임 수치. 평지 프리셋처럼 파일 하나를 통째로 쓰며, 나중에 읽는 묶음의 파일이 앞 묶음의 것을 대신한다. 어느 묶음에도 없으면 오류다. 길이는 블록, 속도는 블록/초.
+
+```json
+{
+  "width": 0.6, "height": 1.8,
+  "eye_height": 1.62, "sneak_eye_height": 1.27,
+  "step_height": 0.6,
+  "gravity": 32.0, "terminal_velocity": 78.0, "jump_velocity": 9.8,
+  "walk_speed": 4.3, "sprint_speed": 5.6, "sneak_speed": 1.3,
+  "ground_acceleration": 0.5, "air_acceleration": 0.05
+}
+```
+
+| 필드 | 범위 | 뜻 |
+| --- | --- | --- |
+| `width`, `height` | 0.1 ~ 4 | 충돌 상자(가로·세로 같은 정사각 바닥 × 키). 위치는 발 중심 |
+| `eye_height` | 0 초과 ~ `height` | 카메라 높이(발 기준) |
+| `sneak_eye_height` | 0 초과 ~ `eye_height` | 웅크렸을 때 카메라 높이 |
+| `step_height` | 0 ~ `height` 미만 | 점프 없이 저절로 오르는 턱의 최대 높이 |
+| `gravity` | 0 ~ 200 | 블록/초² |
+| `terminal_velocity` | 0 초과 ~ 200 | 가장 빠른 낙하 속도 |
+| `jump_velocity` | 0 ~ 50 | 점프 순간의 위쪽 속도. 9.8이면 꼭대기 약 1.26블록 |
+| `walk_speed`, `sprint_speed`, `sneak_speed` | 0 ~ 50 | 걷기, 달리기(앞으로 갈 때만, 웅크리면 무시), 웅크리기 속도 |
+| `ground_acceleration`, `air_acceleration` | 0 초과 ~ 1 | 한 틱(1/20초)마다 목표 속도와의 차이를 줄이는 비율. 땅과 공중 |
+
+- 모든 필드가 필요하고 유한한 숫자여야 한다(정수도 됨). 범위를 벗어나면 필드의 JSON 포인터와 함께 오류, 모르는 필드는 경고다. 오류가 하나라도 있으면 창을 만들기 전에 종료 코드 1.
+- 폭·키의 하한 0.1은 충돌의 허용 오차(1e-7블록)보다 충분히 커서, 상자가 덮는 칸의 범위가 비지 않게 하려는 것이다.
+- 이 수치는 서버와 클라이언트(예측)가 똑같이 쓴다. 한 틱의 계산 순서는 `engine/src/entity/player_movement.h`의 `stepPlayer` 설명을 따른다.
 
 ## 예시
 

@@ -19,7 +19,8 @@ struct MoveInput {
     bool fast = false;
 };
 
-// Free-flying camera. Position in double (block units), so it stays exact far from the origin.
+// The view: a free-flying camera (move()) or one placed every frame, at the player's eyes (setPosition()).
+// Position in double (block units), so it stays exact far from the origin.
 //
 // Angles in degrees. Yaw 0 looks north (-Z), 90 east (+X), 180 south (+Z), 270 west (-X). Pitch is positive
 // upwards and kept within +-kMaxPitch.
@@ -43,6 +44,7 @@ public:
     void turn(double dxPixels, double dyPixels);
     // Moves for one frame. The direction is normalised, so diagonal movement is not faster.
     void move(const MoveInput& input, double frameSeconds);
+    void setPosition(const glm::dvec3& position) { m_position = position; }
 
     const glm::dvec3& position() const { return m_position; }
     double yaw() const { return m_yaw; }

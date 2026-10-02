@@ -31,9 +31,11 @@ inline constexpr std::size_t kMouseButtonCount = static_cast<std::size_t>(MouseB
 // - Presses and cursor movement belong to one frame: startFrame() clears them.
 // - A focus loss is kept until takeFocusLost() consumes it. Frames that only wait (a minimised window) call
 //   startFrame() too, so a per-frame flag would be lost there and a captured mouse would stay captured.
-// - Losing focus voids the mouse button presses already recorded, and presses while unfocused are not recorded.
-//   One poll can hold "click, then focus lost" (even "click, lost, regained"); the click must not capture the
-//   mouse right after the loss released it. A click after focus came back counts as usual.
+// - Losing focus voids the key and mouse button presses already recorded, and presses while unfocused are not
+//   recorded. One poll can hold "click, then focus lost" (even "click, lost, regained"); the click must not capture
+//   the mouse right after the loss released it, and a key press (a jump) from before the loss must not reach the
+//   game afterwards. Presses after focus came back count as usual. So an F3 or Esc pressed in the same poll just
+//   before a focus loss is dropped too; the focus loss releases the mouse anyway.
 class InputState {
 public:
     void startFrame()
@@ -43,7 +45,12 @@ public:
         m_cursorMoved = false;
     }
 
-    void onKeyPressed(Key key) { m_keyPressed[static_cast<std::size_t>(key)] = true; }
+    void onKeyPressed(Key key)
+    {
+        if (m_focused) {
+            m_keyPressed[static_cast<std::size_t>(key)] = true;
+        }
+    }
     void onButtonPressed(MouseButton button)
     {
         if (m_focused) {
@@ -61,6 +68,7 @@ public:
         m_focused = focused;
         if (!focused) {
             m_focusLost = true;
+            m_keyPressed.fill(false);
             m_buttonPressed.fill(false);
         }
     }

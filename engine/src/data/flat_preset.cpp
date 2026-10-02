@@ -4,7 +4,7 @@
 #include "core/log.h"
 #include "core/utf8.h"
 #include "data/json_support.h"
-#include "data/path_probe.h"
+#include "data/pack_files.h"
 
 #include <format>
 #include <optional>
@@ -17,46 +17,111 @@ namespace {
 using namespace json;
 namespace fs = std::filesystem;
 
-constexpr std::array<std::string_view, 1> kRootFields{"layers"};
+constexpr std::array<std::string_view, 2> kRootFields{"layers", "boxes"};
 constexpr std::array<std::string_view, 2> kLayerFields{"block", "height"};
+constexpr std::array<std::string_view, 3> kBoxFields{"block", "from", "to"};
+constexpr std::array<char, 3> kAxisNames{'x', 'y', 'z'};
 
-fs::path presetPath(const DataPack& pack)
+std::optional<BlockStateId> readState(const Json& object, const std::string& pointer, const BlockRegistry& registry,
+                                      FileIssues& issues)
 {
-    return pack.root / "data" / std::string(kBaseNamespace) / "worldgen" / "flat.json";
-}
-
-// The file from the last pack that has one. Anything unusable in its place (broken link, a folder) is an error
-// rather than a reason to fall back to an earlier pack.
-std::optional<fs::path> findPresetFile(std::span<const DataPack> packs, std::vector<LoadIssue>& issues)
-{
-    for (auto pack = packs.rbegin(); pack != packs.rend(); ++pack) {
-        const fs::path candidate = presetPath(*pack);
-        const PathProbe probe = probePath(candidate);
-        switch (probe.kind) {
-        case PathKind::File:
-            return candidate;
-        case PathKind::Missing:
-            continue;
-        case PathKind::Failed:
-            issues.push_back({IssueSeverity::Error, candidate, {}, std::format("cannot read: {}", probe.failure)});
-            return std::nullopt;
-        case PathKind::Directory:
-        case PathKind::Other:
-            issues.push_back({IssueSeverity::Error, candidate, {}, "expected a file"});
-            return std::nullopt;
-        }
+    const Json* block = findField(object, "block");
+    if (block == nullptr) {
+        issues.error(pointer, "missing required field 'block'");
+        return std::nullopt;
     }
-    const fs::path expected = packs.empty() ? fs::path("data/aurora/worldgen/flat.json") : presetPath(packs.front());
-    issues.push_back({IssueSeverity::Error, expected, {}, "missing required file (the flat world preset)"});
-    return std::nullopt;
+    if (!block->is_string()) {
+        issues.error(pointer + "/block", std::format("expected a block state string, got {}", describe(*block)));
+        return std::nullopt;
+    }
+    const BlockRegistry::ParseResult parsed = registry.parseState(block->get_ref<const std::string&>());
+    if (!parsed.state) {
+        issues.error(pointer + "/block", parsed.error);
+    }
+    return parsed.state;
 }
 
-void warnUnknownFields(const Json& object, std::span<const std::string_view> known, const std::string& pointer,
-                       FileIssues& issues)
+// A whole number within [low, high]. Floats (2.0, 1e3) are errors even when whole.
+std::optional<std::int32_t> readCoordinate(const Json& value, const std::string& pointer, std::int64_t low,
+                                           std::int64_t high, FileIssues& issues)
 {
-    for (const auto& [key, value] : object.items()) {
-        if (std::ranges::find(known, key) == known.end()) {
-            issues.warning(childPointer(pointer, key), std::format("unknown field '{}' (ignored)", key));
+    std::optional<std::int64_t> number;
+    if (value.is_number_unsigned()) {
+        const std::uint64_t unsignedValue = value.get<std::uint64_t>();
+        number = unsignedValue > static_cast<std::uint64_t>(high) ? high + 1 : static_cast<std::int64_t>(unsignedValue);
+    } else if (value.is_number_integer()) {
+        number = value.get<std::int64_t>();
+    }
+    if (!number || *number < low || *number > high) {
+        issues.error(pointer, std::format("expected a whole number from {} to {}, got {}", low, high, describe(value)));
+        return std::nullopt;
+    }
+    return static_cast<std::int32_t>(*number);
+}
+
+std::optional<std::array<std::int32_t, 3>> readCorner(const Json& box, std::string_view name,
+                                                      const std::string& pointer, FileIssues& issues)
+{
+    const Json* corner = findField(box, name);
+    const std::string cornerPointer = childPointer(pointer, name);
+    if (corner == nullptr) {
+        issues.error(pointer, std::format("missing required field '{}'", name));
+        return std::nullopt;
+    }
+    if (!corner->is_array() || corner->size() != 3) {
+        issues.error(cornerPointer, std::format("expected [x, y, z], got {}", describe(*corner)));
+        return std::nullopt;
+    }
+    std::array<std::int32_t, 3> result{};
+    bool valid = true;
+    for (std::size_t axis = 0; axis < 3; ++axis) {
+        const bool vertical = axis == 1;
+        const std::int64_t low = vertical ? core::kWorldMinY : -std::int64_t{kMaxFlatBoxCoordinate};
+        const std::int64_t high = vertical ? core::kWorldMaxY - 1 : std::int64_t{kMaxFlatBoxCoordinate};
+        const std::optional<std::int32_t> value =
+            readCoordinate((*corner)[axis], std::format("{}/{}", cornerPointer, axis), low, high, issues);
+        valid = valid && value.has_value();
+        result[axis] = value.value_or(0);
+    }
+    return valid ? std::optional(result) : std::nullopt;
+}
+
+void readBoxes(const Json& boxes, const BlockRegistry& registry, FlatPreset& preset, FileIssues& issues)
+{
+    if (!boxes.is_array()) {
+        issues.error("/boxes", std::format("expected an array of boxes, got {}", describe(boxes)));
+        return;
+    }
+    if (boxes.size() > kMaxFlatBoxes) {
+        issues.error("/boxes", std::format("at most {} boxes, got {}", kMaxFlatBoxes, boxes.size()));
+        return;
+    }
+    for (std::size_t i = 0; i < boxes.size(); ++i) {
+        const Json& box = boxes[i];
+        const std::string pointer = std::format("/boxes/{}", i);
+        if (!box.is_object()) {
+            issues.error(pointer, std::format("expected an object {{\"block\": ..., \"from\": ..., \"to\": ...}}, "
+                                              "got {}",
+                                              describe(box)));
+            continue;
+        }
+        warnUnknownFields(box, kBoxFields, pointer, issues);
+        const std::optional<BlockStateId> state = readState(box, pointer, registry, issues);
+        const auto from = readCorner(box, "from", pointer, issues);
+        const auto to = readCorner(box, "to", pointer, issues);
+        bool ordered = true;
+        if (from && to) {
+            for (std::size_t axis = 0; axis < 3; ++axis) {
+                if ((*from)[axis] > (*to)[axis]) {
+                    issues.error(std::format("{}/to/{}", pointer, axis),
+                                 std::format("{} must not be below from ({}): got {}", kAxisNames[axis],
+                                             (*from)[axis], (*to)[axis]));
+                    ordered = false;
+                }
+            }
+        }
+        if (state && from && to && ordered) {
+            preset.boxes.push_back({*state, *from, *to});
         }
     }
 }
@@ -75,7 +140,9 @@ std::uint32_t FlatPreset::totalHeight() const
 FlatPresetLoadResult loadFlatPreset(std::span<const DataPack> packs, const BlockRegistry& registry)
 {
     FlatPresetLoadResult result;
-    const std::optional<fs::path> file = findPresetFile(packs, result.issues);
+    const std::optional<fs::path> file =
+        findLastPackFile(packs, fs::path("data") / std::string(kBaseNamespace) / "worldgen" / "flat.json",
+                         "the flat world preset", result.issues);
     if (!file) {
         return result;
     }
@@ -115,18 +182,7 @@ FlatPresetLoadResult loadFlatPreset(std::span<const DataPack> packs, const Block
         }
         warnUnknownFields(layer, kLayerFields, pointer, issues);
 
-        std::optional<BlockStateId> state;
-        if (const Json* block = findField(layer, "block"); block == nullptr) {
-            issues.error(pointer, "missing required field 'block'");
-        } else if (!block->is_string()) {
-            issues.error(pointer + "/block", std::format("expected a block state string, got {}", describe(*block)));
-        } else {
-            const BlockRegistry::ParseResult parsed = registry.parseState(block->get_ref<const std::string&>());
-            if (!parsed.state) {
-                issues.error(pointer + "/block", parsed.error);
-            }
-            state = parsed.state;
-        }
+        const std::optional<BlockStateId> state = readState(layer, pointer, registry, issues);
 
         std::optional<std::uint32_t> height;
         if (const Json* value = findField(layer, "height"); value == nullptr) {
@@ -149,6 +205,10 @@ FlatPresetLoadResult loadFlatPreset(std::span<const DataPack> packs, const Block
         }
     }
 
+    if (const Json* boxes = findField(*root, "boxes")) {
+        readBoxes(*boxes, registry, *preset, issues);
+    }
+
     if (!issues.hasErrors()) {
         result.preset = std::move(preset);
     }
@@ -159,9 +219,10 @@ void logFlatPresetLoadResult(const FlatPresetLoadResult& result)
 {
     logIssues(result.issues);
     if (result.preset) {
-        core::logInfo("data", "Flat world preset: {} layers, {} blocks high (top layer ends at y {})",
+        core::logInfo("data", "Flat world preset: {} layers, {} blocks high (top layer ends at y {}), {} boxes",
                       result.preset->layers.size(), result.preset->totalHeight(),
-                      core::kWorldMinY + static_cast<std::int32_t>(result.preset->totalHeight()) - 1);
+                      core::kWorldMinY + static_cast<std::int32_t>(result.preset->totalHeight()) - 1,
+                      result.preset->boxes.size());
     } else {
         core::logError("data", "The flat world preset has {} error(s); fix the lines above",
                        countIssues(result.issues, IssueSeverity::Error));

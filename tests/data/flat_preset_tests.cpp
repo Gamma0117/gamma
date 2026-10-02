@@ -5,6 +5,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
+#include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -245,4 +248,89 @@ TEST_CASE("The shipped flat preset is 124 stone 3 dirt and 1 grass", "[data][fla
     CHECK(layers[1].height == 3);
     CHECK(blocks.registry->stateToString(layers[2].state) == "aurora:grass_block");
     CHECK(layers[2].height == 1);
+}
+
+TEST_CASE("Flat preset boxes load in file order", "[data][flat]")
+{
+    const auto registry = aurora::test::makeTestRegistry();
+    TempGame game("flat_boxes");
+    const FlatPresetLoadResult result = loadPreset(game, R"({
+        "layers": [{"block": "aurora:stone", "height": 128}],
+        "boxes": [
+            {"block": "aurora:dirt", "from": [-30000000, -64, 5], "to": [30000000, 319, 5]},
+            {"block": "aurora:air", "from": [-3, 60, -3], "to": [-1, 63, -1]}
+        ]
+    })",
+                                                   *registry);
+    INFO(describeIssues(result.issues));
+    REQUIRE(result.preset);
+    CHECK(result.issues.empty());
+    const std::vector<FlatBox>& boxes = result.preset->boxes;
+    REQUIRE(boxes.size() == 2);
+    CHECK(registry->stateToString(boxes[0].state) == "aurora:dirt");
+    CHECK(boxes[0].from == std::array<std::int32_t, 3>{-30'000'000, -64, 5});
+    CHECK(boxes[0].to == std::array<std::int32_t, 3>{30'000'000, 319, 5});
+    CHECK(boxes[1].state == kAirState);
+    CHECK(boxes[1].from == std::array<std::int32_t, 3>{-3, 60, -3});
+}
+
+TEST_CASE("Flat preset box problems are errors", "[data][flat]")
+{
+    const aurora::test::QuietLog quiet;
+    const auto registry = aurora::test::makeTestRegistry();
+    TempGame game("flat_bad_boxes");
+    const auto load = [&](std::string_view box) {
+        return loadPreset(game,
+                          std::string(R"({"layers": [{"block": "aurora:stone", "height": 5}], "boxes": [)") +
+                              std::string(box) + "]}",
+                          *registry);
+    };
+    struct Case {
+        std::string_view box;
+        std::string_view pointer;
+        std::string_view text;
+    };
+    const Case cases[] = {
+        {R"({"block": "aurora:stone", "from": [2.0, 0, 0], "to": [3, 0, 0]})", "/boxes/0/from/0", "whole number"},
+        {R"({"block": "aurora:stone", "from": [0, 0, 0], "to": [1e3, 0, 0]})", "/boxes/0/to/0", "whole number"},
+        {R"({"block": "aurora:stone", "from": [0, -65, 0], "to": [0, 0, 0]})", "/boxes/0/from/1", "-64 to 319"},
+        {R"({"block": "aurora:stone", "from": [0, 0, 0], "to": [0, 320, 0]})", "/boxes/0/to/1", "-64 to 319"},
+        {R"({"block": "aurora:stone", "from": [30000001, 0, 0], "to": [30000001, 0, 0]})", "/boxes/0/from/0",
+         "-30000000 to 30000000"},
+        {R"({"block": "aurora:stone", "from": [0, 0, -99999999999999999999], "to": [0, 0, 0]})", "/boxes/0/from/2",
+         "whole number"},
+        {R"({"block": "aurora:stone", "from": [0, 0, 18446744073709551615], "to": [0, 0, 0]})", "/boxes/0/from/2",
+         "whole number"},
+        {R"({"block": "aurora:stone", "from": [5, 0, 0], "to": [4, 0, 0]})", "/boxes/0/to/0", "must not be below"},
+        {R"({"block": "aurora:stone", "from": [0, 0], "to": [0, 0, 0]})", "/boxes/0/from", "[x, y, z]"},
+        {R"({"block": "aurora:stone", "to": [0, 0, 0]})", "/boxes/0", "missing required field 'from'"},
+        {R"({"block": "aurora:bedrock", "from": [0, 0, 0], "to": [0, 0, 0]})", "/boxes/0/block", "bedrock"},
+        {R"({"from": [0, 0, 0], "to": [0, 0, 0]})", "/boxes/0", "missing required field 'block'"},
+        {R"("stone")", "/boxes/0", "expected an object"},
+    };
+    for (const Case& c : cases) {
+        INFO(c.box);
+        const FlatPresetLoadResult result = load(c.box);
+        INFO(describeIssues(result.issues));
+        CHECK_FALSE(result.preset);
+        CHECK(hasError(result, c.pointer, c.text));
+    }
+
+    SECTION("Not an array")
+    {
+        const FlatPresetLoadResult result = loadPreset(
+            game, R"({"layers": [{"block": "aurora:stone", "height": 5}], "boxes": {"a": 1}})", *registry);
+        CHECK(hasError(result, "/boxes", "expected an array"));
+    }
+    SECTION("Too many boxes")
+    {
+        constexpr std::string_view kBox = R"({"block": "aurora:stone", "from": [0, 0, 0], "to": [0, 0, 0]})";
+        std::string boxes;
+        for (std::size_t i = 0; i <= kMaxFlatBoxes; ++i) {
+            boxes += std::string(i > 0 ? ", " : "") + std::string(kBox);
+        }
+        const FlatPresetLoadResult result = load(boxes);
+        CHECK_FALSE(result.preset);
+        CHECK(hasError(result, "/boxes", "at most 256 boxes"));
+    }
 }

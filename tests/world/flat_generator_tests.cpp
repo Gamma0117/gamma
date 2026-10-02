@@ -1,3 +1,4 @@
+#include "data/block_loader.h"
 #include "data/flat_preset.h"
 #include "world/chunk.h"
 #include "world/flat_generator.h"
@@ -8,7 +9,9 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cstdint>
+#include <filesystem>
 #include <memory>
+#include <vector>
 
 using namespace aurora::world;
 using aurora::test::stateOf;
@@ -117,4 +120,86 @@ TEST_CASE("A flat generator keeps its preset alive", "[world][flat]")
     REQUIRE(chunk);
     CHECK(chunk->pos() == ChunkPos{-4, 9});
     CHECK(chunk->height(0, 0) == 63);
+}
+
+TEST_CASE("Flat preset boxes fill only their part of each chunk in order", "[world][flat]")
+{
+    const auto registry = aurora::test::makeTestRegistry();
+    const BlockStateId stone = stateOf(*registry, "aurora:stone");
+    const BlockStateId dirt = stateOf(*registry, "aurora:dirt");
+    const BlockStateId grass = stateOf(*registry, "aurora:grass_block");
+    auto preset = std::make_shared<aurora::data::FlatPreset>(*aurora::test::makeStandardFlatPreset(*registry));
+    preset->boxes = {
+        // Across the border of chunks -1 and 0 (x -2..1) and of 0 and 1 in z (z 14..17).
+        {dirt, {-2, 64, 14}, {1, 65, 17}},
+        // A later box wins: one column of the first one becomes stone.
+        {stone, {0, 65, 15}, {0, 65, 15}},
+        // Carving: a pit in chunk (-1, -1) through the grass and dirt.
+        {aurora::data::kAirState, {-5, 61, -5}, {-4, 63, -4}},
+        // At the coordinate limits; no chunk tested here has any of it.
+        {grass, {29'999'990, -64, 29'999'990}, {30'000'000, 319, 30'000'000}},
+    };
+
+    const std::unique_ptr<Chunk> origin = generateFlatChunk(*preset, ChunkPos{0, 0});
+    CHECK(origin->getBlock(0, 64, 14) == dirt);
+    CHECK(origin->getBlock(1, 65, 15) == dirt);
+    CHECK(origin->getBlock(0, 65, 15) == stone);
+    CHECK(origin->getBlock(2, 64, 14) == aurora::data::kAirState);  // Past x = 1.
+    CHECK(origin->getBlock(0, 66, 14) == aurora::data::kAirState);  // Above y = 65.
+    CHECK(origin->getBlock(0, 64, 13) == aurora::data::kAirState);  // Before z = 14.
+    CHECK(origin->height(0, 14) == 65);
+    CHECK(origin->height(5, 5) == 63);
+
+    const std::unique_ptr<Chunk> west = generateFlatChunk(*preset, ChunkPos{-1, 0});
+    CHECK(west->getBlock(14, 64, 14) == dirt); // x -2.
+    CHECK(west->getBlock(13, 64, 14) == aurora::data::kAirState);
+    const std::unique_ptr<Chunk> south = generateFlatChunk(*preset, ChunkPos{0, 1});
+    CHECK(south->getBlock(1, 65, 1) == dirt); // z 17.
+    CHECK(south->getBlock(1, 65, 2) == aurora::data::kAirState);
+
+    // The carved pit: the height map sees it.
+    const std::unique_ptr<Chunk> pit = generateFlatChunk(*preset, ChunkPos{-1, -1});
+    CHECK(pit->getBlock(11, 63, 11) == aurora::data::kAirState); // x -5, z -5.
+    CHECK(pit->getBlock(11, 61, 11) == aurora::data::kAirState);
+    CHECK(pit->getBlock(11, 60, 11) == dirt);
+    CHECK(pit->height(11, 11) == 60);
+    CHECK(pit->height(10, 10) == 63); // x -6: untouched.
+
+    // The far corner of the world: chunk 1874999 holds 29999984..29999999, the box starts at 29999990.
+    const std::unique_ptr<Chunk> far = generateFlatChunk(*preset, ChunkPos{1'874'999, 1'874'999});
+    CHECK(far->getBlock(6, 300, 6) == grass);
+    CHECK(far->getBlock(5, 300, 6) == aurora::data::kAirState);
+    const std::unique_ptr<Chunk> edge = generateFlatChunk(*preset, ChunkPos{1'875'000, 1'875'000});
+    CHECK(edge->getBlock(0, 319, 0) == grass); // 30000000 itself.
+    CHECK(edge->getBlock(1, 319, 0) == aurora::data::kAirState);
+}
+
+TEST_CASE("The shipped course leaves the spawn column and the view north clear", "[world][flat]")
+{
+    const std::vector<aurora::data::DataPack> packs{
+        {"aurora", std::filesystem::path(AURORA_SOURCE_DIR) / "game", true}};
+    const aurora::data::BlockLoadResult blocks = aurora::data::loadBlocks(packs);
+    REQUIRE(blocks.registry);
+    const aurora::data::FlatPresetLoadResult loaded = aurora::data::loadFlatPreset(packs, *blocks.registry);
+    INFO(aurora::test::describeIssues(loaded.issues));
+    REQUIRE(loaded.preset);
+    CHECK_FALSE(loaded.preset->boxes.empty());
+
+    // The spawn column (0, 0): grass on top at 63, so the player stands at 64 with nothing above.
+    const std::unique_ptr<Chunk> origin = generateFlatChunk(*loaded.preset, ChunkPos{0, 0});
+    CHECK(origin->height(0, 0) == 63);
+    // The start view looks north (-z): the course lies south of z = 4.
+    for (std::int32_t z = 0; z <= 4; ++z) {
+        for (std::int32_t x = 0; x < 16; ++x) {
+            CHECK(origin->height(x, z) == 63);
+        }
+    }
+    for (const ChunkPos pos : {ChunkPos{0, -1}, ChunkPos{-1, -1}}) {
+        const std::unique_ptr<Chunk> north = generateFlatChunk(*loaded.preset, pos);
+        for (std::int32_t z = 0; z < 16; ++z) {
+            for (std::int32_t x = 0; x < 16; ++x) {
+                CHECK(north->height(x, z) == 63);
+            }
+        }
+    }
 }

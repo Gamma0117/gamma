@@ -34,6 +34,9 @@ public:
 
     // Deadline of the next tick that has not been handed out yet.
     TimePoint nextTickTime() const { return m_nextTick; }
+    // How far `now` is into the current interval: 1 - (nextTickTime() - now) / interval, within [0, 1]. For drawing
+    // between the last two ticks.
+    double progress(TimePoint now) const;
     Duration interval() const { return m_interval; }
 
 private:

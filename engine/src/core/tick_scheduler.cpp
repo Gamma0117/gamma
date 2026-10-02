@@ -33,4 +33,10 @@ TickScheduler::Advance TickScheduler::advance(TimePoint now)
     return {1, due - 1};
 }
 
+double TickScheduler::progress(TimePoint now) const
+{
+    const double left = std::chrono::duration<double>(m_nextTick - now) / std::chrono::duration<double>(m_interval);
+    return std::clamp(1.0 - left, 0.0, 1.0);
+}
+
 } // namespace aurora::core

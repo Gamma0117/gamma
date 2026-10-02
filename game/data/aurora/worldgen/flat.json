@@ -3,5 +3,19 @@
     { "block": "aurora:stone", "height": 124 },
     { "block": "aurora:dirt", "height": 3 },
     { "block": "aurora:grass_block", "height": 1 }
+  ],
+  "boxes": [
+    { "block": "aurora:cobblestone", "from": [0, 64, 5], "to": [2, 64, 7] },
+    { "block": "aurora:cobblestone", "from": [0, 65, 6], "to": [2, 65, 7] },
+    { "block": "aurora:cobblestone", "from": [0, 66, 7], "to": [2, 66, 7] },
+
+    { "block": "aurora:oak_planks", "from": [5, 64, 5], "to": [7, 65, 5] },
+
+    { "block": "aurora:oak_planks", "from": [-6, 64, 5], "to": [-6, 65, 9] },
+    { "block": "aurora:oak_planks", "from": [-4, 64, 5], "to": [-4, 65, 9] },
+    { "block": "aurora:oak_planks", "from": [-6, 66, 5], "to": [-4, 66, 9] },
+
+    { "block": "aurora:air", "from": [9, 62, 5], "to": [11, 63, 7] },
+    { "block": "aurora:cobblestone", "from": [9, 62, 7], "to": [11, 62, 7] }
   ]
 }
