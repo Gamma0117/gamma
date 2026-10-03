@@ -24,10 +24,13 @@ public:
     // taken may go over the budget.
     std::vector<client::ReadyMesh> take(const client::ClientWorld& world, std::size_t byteBudget);
     std::size_t size() const { return m_meshes.size(); }
+    // Queued meshes take() dropped so far because they were stale.
+    std::uint64_t dropped() const { return m_dropped; }
     void clear() { m_meshes.clear(); }
 
 private:
     std::deque<client::ReadyMesh> m_meshes;
+    std::uint64_t m_dropped = 0;
 };
 
 enum class MeshUpdate : std::uint8_t {

@@ -13,6 +13,9 @@ struct CollisionWorld;
 
 // What the player wants during one tick. Angles in degrees, as client::Camera: yaw 0 looks north (-Z), 90 east;
 // pitch positive upwards. The look is the client's to decide; only the movement is checked by the server.
+//
+// The block actions ride on the same intent, so whatever makes an intent neutral (a Neutralize, a starving or
+// filling tick, a look that is not a number) drops them too. stepPlayer ignores them.
 struct MovementIntent {
     std::int8_t forward = 0; // +1 forward (W), -1 back (S).
     std::int8_t strafe = 0;  // +1 right (D), -1 left (A).
@@ -21,8 +24,13 @@ struct MovementIntent {
     bool sprint = false;
     float yaw = 0.0f;
     float pitch = 0.0f;
+    // Block actions of this tick (P0-7).
+    bool attack = false;   // Mine what the look hits: the left button is held (after a press in an accepting
+                           // frame) or was tapped since the last tick.
+    bool use = false;      // Place on the face the look hits: a right-button press since the last tick.
+    std::uint8_t slot = 0; // Palette slot for `use`, 0..8; the server checks it against its palette.
 
-    // No movement, no jump, sneak or sprint; the same look.
+    // No movement, no jump, sneak or sprint, no block action; the same look.
     MovementIntent neutral() const { return {.yaw = yaw, .pitch = pitch}; }
     bool operator==(const MovementIntent&) const = default;
 };

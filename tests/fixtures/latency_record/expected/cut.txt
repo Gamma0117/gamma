@@ -1,0 +1,2 @@
+INCOMPLETE (2 samples: p50 10.0 ms, p95 40.0 ms, max 40.0 ms)
+  no closing line (the run did not end normally, or the file was cut)

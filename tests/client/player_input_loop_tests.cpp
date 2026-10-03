@@ -1,7 +1,4 @@
-#include "client/player_control.h"
-#include "platform/input_state.h"
-
-#include "../entity/entity_test_support.h"
+#include "player_loop_support.h"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -15,81 +12,11 @@
 using namespace std::chrono_literals;
 using aurora::client::MovementKeys;
 using aurora::client::PlayerControl;
-using aurora::client::PlayerFrameInput;
+using aurora::test::PlayerLoop;
 using aurora::entity::PlayerInput;
 using aurora::platform::InputState;
 using aurora::platform::Key;
 using aurora::platform::MouseButton;
-
-namespace {
-
-// What PlayerControl would send to the server, in order.
-struct RecordingSink final : aurora::client::PlayerMessageSink {
-    std::vector<PlayerInput> sent;
-    std::vector<std::uint32_t> neutralized;
-
-    void sendInput(const PlayerInput& input) override { sent.push_back(input); }
-    void sendNeutralize(std::uint32_t through) override { neutralized.push_back(through); }
-};
-
-// The app's player frame on a real InputState: poll (the events), then the production PlayerControl does the rest in
-// its own order (input(), the frame's client ticks in update(), and the F3 switch after them). Time moves 50 ms per
-// client tick, so a frame runs exactly `ticks` ticks.
-struct PlayerLoop {
-    aurora::test::TestBlocks blocks;
-    aurora::entity::CollisionWorld world = blocks.world();
-    InputState input;
-    RecordingSink sink;
-    PlayerControl control{std::make_shared<const aurora::data::PlayerMovementTuning>(aurora::test::standardTuning()),
-                          world, sink};
-    MovementKeys held;
-    aurora::core::TickScheduler::TimePoint now = aurora::core::TickScheduler::TimePoint{} + 1000s;
-    bool uiWantsMouse = false;
-    bool uiWantsKeyboard = false;
-    bool enabled = true;
-
-    PlayerLoop()
-    {
-        // The spawn starts the client clock; its first tick runs at once (not accepting yet: a neutral input).
-        control.update(aurora::entity::PlayerState{.serverTick = 1, .motion = aurora::test::standingAt(0.5, 64.0, 0.5)},
-                       now, held, 90.0f, 0.0f);
-    }
-
-    const aurora::client::CursorController& cursor() const { return control.cursor(); }
-
-    void frame(const std::function<void()>& duringPoll, int ticks = 1, bool minimised = false,
-               bool switchFreeFlight = false)
-    {
-        input.startFrame();
-        duringPoll();
-        const PlayerFrameInput events{.focusLost = input.takeFocusLost(),
-                                      .minimised = minimised,
-                                      .focused = input.isFocused(),
-                                      .escapePressed = input.wasKeyPressed(Key::Escape),
-                                      .clickPressed = input.wasButtonPressed(MouseButton::Left),
-                                      .uiWantsMouse = uiWantsMouse,
-                                      .uiWantsKeyboard = uiWantsKeyboard,
-                                      .jumpPressed = input.wasKeyPressed(Key::Space),
-                                      .enabled = enabled};
-        if (!control.input(events)) {
-            return;
-        }
-        now += aurora::core::kTickInterval * ticks;
-        control.update(std::nullopt, now, held, 90.0f, 0.0f);
-        if (switchFreeFlight) {
-            control.setFreeFlight(!control.freeFlight());
-        }
-    }
-
-    // Captured and taking input, with one input sent.
-    void capture()
-    {
-        frame([&] { input.onButtonPressed(MouseButton::Left); });
-        frame([] {});
-    }
-};
-
-} // namespace
 
 TEST_CASE("Space then Esc then a click in one poll never jumps and neutralises", "[client][input][loop]")
 {

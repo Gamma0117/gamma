@@ -39,6 +39,10 @@ DecodeResult decodePng(std::span<const std::byte> bytes);
 // failure.
 std::optional<std::vector<std::byte>> readFileBytes(const std::filesystem::path& file, std::string& error);
 
+// Reads and decodes `file` as a block texture: a PNG of exactly kBlockTextureSize x kBlockTextureSize. nullopt with
+// an Error issue naming the file otherwise.
+std::optional<RgbaImage> readBlockTextureFile(const std::filesystem::path& file, std::vector<LoadIssue>& issues);
+
 struct BlockTexture {
     ResourceId id;
     std::filesystem::path file;

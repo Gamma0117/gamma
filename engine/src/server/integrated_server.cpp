@@ -7,7 +7,9 @@
 #include "core/tick_scheduler.h"
 #include "core/timing_history.h"
 #include "data/player_movement.h"
+#include "data/player_interaction.h"
 #include "entity/collision_shapes.h"
+#include "server/block_interaction.h"
 #include "server/world_collision_view.h"
 #include "world/flat_generator.h"
 #include "world/world.h"
@@ -75,9 +77,9 @@ bool IntegratedServer::start()
         m_stats.running = true;
         m_stats.hasWorld = hasWorldConfig(m_config);
         m_stats.hasPlayer = m_stats.hasWorld && m_config.playerMovement;
-        m_chunkUpdates.clear();
+        m_stats.hasInteraction = m_stats.hasPlayer && m_config.playerInteraction;
+        m_frame = ServerFrame{};
         m_playerMessages.clear();
-        m_playerState.reset();
     }
     try {
         m_thread = std::thread(&IntegratedServer::run, this);
@@ -122,10 +124,10 @@ void IntegratedServer::setViewCenterOverride(std::optional<world::ChunkPos> cent
     m_viewCenterOverride = center;
 }
 
-std::vector<world::ChunkUpdate> IntegratedServer::takeChunkUpdates()
+ServerFrame IntegratedServer::takeFrame()
 {
     std::lock_guard lock(m_mutex);
-    return std::exchange(m_chunkUpdates, {});
+    return std::exchange(m_frame, {});
 }
 
 void IntegratedServer::sendPlayerInput(const entity::PlayerInput& input)
@@ -138,12 +140,6 @@ void IntegratedServer::neutralizePlayerInputs(std::uint32_t through)
 {
     std::lock_guard lock(m_mutex);
     m_playerMessages.push_back({.kind = PlayerMessage::Kind::Neutralize, .through = through});
-}
-
-std::optional<entity::PlayerState> IntegratedServer::takePlayerState()
-{
-    std::lock_guard lock(m_mutex);
-    return std::exchange(m_playerState, std::nullopt);
 }
 
 void IntegratedServer::run()
@@ -173,6 +169,7 @@ void IntegratedServer::runLoop()
     // Owned by this thread only; other threads see copies in m_stats and the mailboxes.
     std::unique_ptr<world::World> world;
     std::unique_ptr<ServerPlayer> player;
+    std::unique_ptr<BlockInteraction> interaction;
     std::shared_ptr<const entity::CollisionShapes> shapes = m_config.collisionShapes;
     const std::int32_t loadRadius = std::max(0, m_config.loadRadius);
     if (hasWorldConfig(m_config)) {
@@ -187,9 +184,12 @@ void IntegratedServer::runLoop()
                 shapes = std::make_shared<const entity::CollisionShapes>(
                     entity::CollisionShapes::fromRegistry(*m_config.blocks));
             }
+            if (m_config.playerInteraction) {
+                interaction = std::make_unique<BlockInteraction>(m_config.playerInteraction, m_config.blocks, shapes);
+            }
         }
     }
-    const Simulation simulation{world.get(), player.get(), shapes.get()};
+    const Simulation simulation{world.get(), player.get(), shapes.get(), interaction.get()};
 
     core::TickScheduler scheduler(core::kTickInterval, core::kMaxCatchUpTicks);
     core::TimingHistory tickTimes(kTickHistory);
@@ -243,22 +243,22 @@ void IntegratedServer::runLoop()
                 }
             }
 
-            const world::WorldStats worldStats = world ? world->stats() : world::WorldStats{};
-            if (world && !spawnAreaReady && worldStats.pendingChunks == 0) {
-                spawnAreaReady = true;
-                const std::chrono::duration<double, std::milli> elapsed = tickEnd - startTime;
-                core::logInfo("server", "Spawn area ready after {:.0f} ms: {} chunks loaded, {} failed",
-                              elapsed.count(), worldStats.loadedChunks, worldStats.failedChunks);
+            if (world && !spawnAreaReady) {
+                const world::WorldStats worldStats = world->stats();
+                if (worldStats.pendingChunks == 0) {
+                    spawnAreaReady = true;
+                    const std::chrono::duration<double, std::milli> elapsed = tickEnd - startTime;
+                    core::logInfo("server", "Spawn area ready after {:.0f} ms: {} chunks loaded, {} failed",
+                                  elapsed.count(), worldStats.loadedChunks, worldStats.failedChunks);
+                }
             }
 
+            // The loop's own timing; the chunk and player stats are published with the tick (see tick()).
             lock.lock();
             m_stats.tickCount = tickCount;
             m_stats.skippedTicks = skippedTicks;
             m_stats.ticksPerSecond = ticksPerSecond;
             m_stats.tickTime = tickTimes.summary();
-            m_stats.loadedChunks = worldStats.loadedChunks;
-            m_stats.pendingChunks = worldStats.pendingChunks;
-            m_stats.failedChunks = worldStats.failedChunks;
             // Checked between the ticks of a catch-up batch too, so stop never waits for the backlog.
             const bool stopRequested = m_stopRequested;
             lock.unlock();
@@ -274,6 +274,7 @@ void IntegratedServer::runLoop()
     }
     lock.unlock();
 
+    interaction.reset();
     player.reset();
     world.reset(); // On this thread, which owns it. Queued generation jobs finish without it.
     const std::chrono::duration<double> uptime = now() - startTime;
@@ -308,12 +309,6 @@ void IntegratedServer::tick(std::uint64_t tickNumber, const Simulation& simulati
 
     world.ensureLoaded(loadCenter(player, override), std::max(0, m_config.loadRadius));
     world.update();
-    std::vector<world::ChunkUpdate> updates = world.takeChunkUpdates();
-    if (!updates.empty()) {
-        std::lock_guard lock(m_mutex);
-        m_chunkUpdates.insert(m_chunkUpdates.end(), std::make_move_iterator(updates.begin()),
-                              std::make_move_iterator(updates.end()));
-    }
 
     if (player) {
         if (!player->spawned()) {
@@ -321,13 +316,45 @@ void IntegratedServer::tick(std::uint64_t tickNumber, const Simulation& simulati
         }
         const WorldCollisionView view(world);
         player->tick({view, *simulation.shapes});
-        if (player->spawned()) {
-            const entity::PlayerState state = player->state(tickNumber);
-            std::lock_guard lock(m_mutex);
-            m_playerState = state;
-            m_stats.player = player->stats();
+        if (simulation.interaction && player->spawned()) {
+            simulation.interaction->tick(world, *player, tickNumber, now());
         }
     }
+
+    // Publish what this tick made, all at once: a client never sees the player's new state with the world of an
+    // older tick, or the other way round.
+    world.publishChanges();
+    std::vector<world::ChunkUpdate> updates = world.takeChunkUpdates();
+    const Clock::time_point publishedAt = now();
+    for (world::ChunkUpdate& update : updates) {
+        update.serverTick = tickNumber;
+        update.publishedAt = publishedAt;
+    }
+    std::optional<entity::PlayerState> state;
+    std::vector<entity::BlockBrokenEvent> broken;
+    if (player && player->spawned()) {
+        state = player->state(tickNumber);
+        if (simulation.interaction) {
+            simulation.interaction->describe(*state);
+            broken = simulation.interaction->takeBrokenEvents();
+        }
+    }
+    const world::WorldStats worldStats = world.stats();
+
+    std::lock_guard lock(m_mutex);
+    m_frame.chunkUpdates.insert(m_frame.chunkUpdates.end(), std::make_move_iterator(updates.begin()),
+                                std::make_move_iterator(updates.end()));
+    m_frame.broken.insert(m_frame.broken.end(), broken.begin(), broken.end());
+    if (state) {
+        m_frame.playerState = state;
+        m_stats.player = player->stats();
+    }
+    if (simulation.interaction) {
+        m_stats.interaction = simulation.interaction->stats();
+    }
+    m_stats.loadedChunks = worldStats.loadedChunks;
+    m_stats.pendingChunks = worldStats.pendingChunks;
+    m_stats.failedChunks = worldStats.failedChunks;
 }
 
 world::ChunkPos IntegratedServer::loadCenter(const ServerPlayer* player, std::optional<world::ChunkPos> override) const

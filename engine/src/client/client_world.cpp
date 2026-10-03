@@ -33,7 +33,7 @@ ClientWorld::ClientWorld(std::int32_t renderDistance)
 {
 }
 
-void ClientWorld::apply(const world::ChunkUpdate& update)
+bool ClientWorld::apply(const world::ChunkUpdate& update)
 {
     AURORA_PROFILE_ZONE_N("ClientWorld apply");
     const auto found = m_chunks.find(update.pos);
@@ -41,24 +41,35 @@ void ClientWorld::apply(const world::ChunkUpdate& update)
     case world::ChunkUpdate::Kind::Loaded: {
         assert(update.snapshot && update.snapshot->pos() == update.pos);
         if (found != m_chunks.end() && found->second.snapshot->generation() >= update.generation) {
-            return; // Not newer than what is held.
+            return false; // Not newer than what is held.
         }
         m_chunks[update.pos].snapshot = update.snapshot;
         refresh(update.pos, true);
         refreshNeighbours(update.pos);
-        break;
+        return true;
     }
     case world::ChunkUpdate::Kind::Unloaded:
         if (found == m_chunks.end() || found->second.snapshot->generation() != update.generation) {
-            return; // Not the load this ends.
+            return false; // Not the load this ends.
         }
         m_chunks.erase(found);
         if (m_changedSet.insert(update.pos).second) {
             m_changed.push_back(update.pos); // Gone: whatever was made for it is stale.
         }
         refreshNeighbours(update.pos);
-        break;
+        return true;
+    case world::ChunkUpdate::Kind::Changed:
+        assert(update.snapshot && update.snapshot->pos() == update.pos);
+        if (found == m_chunks.end() || found->second.snapshot->generation() != update.generation ||
+            update.snapshot->generation() != update.generation ||
+            update.snapshot->revision() <= found->second.snapshot->revision()) {
+            return false; // Another load, or not newer than what is held.
+        }
+        found->second.snapshot = update.snapshot;
+        markChangedSections(update.pos, update.changedSections);
+        return true;
     }
+    return false;
 }
 
 void ClientWorld::setCenter(world::ChunkPos center)
@@ -130,6 +141,12 @@ std::vector<world::ChunkPos> ClientWorld::takeChangedChunks()
     return std::exchange(m_changed, {});
 }
 
+std::vector<SectionKey> ClientWorld::takeChangedSections()
+{
+    m_changedSectionSet.clear();
+    return std::exchange(m_changedSections, {});
+}
+
 std::size_t ClientWorld::eligibleCount() const
 {
     std::size_t count = 0;
@@ -190,6 +207,37 @@ void ClientWorld::refresh(world::ChunkPos pos, bool inputsChanged)
     entry.stamps.fill(++m_lastStamp);
     if (m_changedSet.insert(pos).second) {
         m_changed.push_back(pos);
+    }
+}
+
+void ClientWorld::markChangedSections(world::ChunkPos pos, std::uint32_t changedSections)
+{
+    // One new stamp for everything this update touches; each section is marked once per update.
+    const std::uint64_t stamp = ++m_lastStamp;
+    std::unordered_set<SectionKey, SectionKeyHash> marked;
+    for (std::int32_t section = 0; section < core::kSectionsPerChunk; ++section) {
+        if ((changedSections >> section & 1u) == 0) {
+            continue;
+        }
+        for (std::int32_t dz = -1; dz <= 1; ++dz) {
+            for (std::int32_t dx = -1; dx <= 1; ++dx) {
+                const world::ChunkPos neighbour = offset(pos, dx, dz);
+                const auto found = m_chunks.find(neighbour);
+                if (found == m_chunks.end()) {
+                    continue;
+                }
+                for (std::int32_t dy = -1; dy <= 1; ++dy) {
+                    const SectionKey key{neighbour, section + dy};
+                    if (key.section < 0 || key.section >= core::kSectionsPerChunk || !marked.insert(key).second) {
+                        continue;
+                    }
+                    found->second.stamps[static_cast<std::size_t>(key.section)] = stamp;
+                    if (m_changedSectionSet.insert(key).second) {
+                        m_changedSections.push_back(key);
+                    }
+                }
+            }
+        }
     }
 }
 

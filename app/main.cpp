@@ -1,9 +1,11 @@
+#include "client/block_particles.h"
 #include "client/camera.h"
 #include "client/client_collision_view.h"
 #include "client/client_world.h"
 #include "client/mesh_scheduler.h"
 #include "client/movement_sampler.h"
 #include "client/player_control.h"
+#include "client/section_latency.h"
 #include "core/constants.h"
 #include "core/job_system.h"
 #include "core/log.h"
@@ -15,9 +17,12 @@
 #include "data/block_textures.h"
 #include "data/flat_preset.h"
 #include "data/game_directory.h"
+#include "data/player_interaction.h"
 #include "data/player_movement.h"
+#include "entity/block_raycast.h"
 #include "entity/collision_shapes.h"
 #include "platform/window.h"
+#include "render/block_effects_renderer.h"
 #include "render/chunk_mesher.h"
 #include "render/chunk_renderer.h"
 #include "render/mesh_resources.h"
@@ -28,12 +33,15 @@
 #include "ui/debug_overlay.h"
 #include "ui/imgui_layer.h"
 
+#include <algorithm>
 #include <charconv>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
 #include <filesystem>
+#include <format>
+#include <fstream>
 #include <memory>
 #include <optional>
 #include <string>
@@ -89,6 +97,8 @@ struct LaunchOptions {
     std::optional<std::filesystem::path> screenshot;
     // Test only: everything but the chunks is drawn, to prove the screenshot check fails without terrain.
     bool drawWorld = true;
+    // Writes every completed section update latency to this CSV file as it completes (see LatencyRecord).
+    std::optional<std::filesystem::path> latencyLog;
 };
 
 bool parseArgs(int argc, char** argv, LaunchOptions& options)
@@ -110,15 +120,60 @@ bool parseArgs(int argc, char** argv, LaunchOptions& options)
             options.screenshot = std::filesystem::path(argv[++i]);
         } else if (arg == "--no-world-draw") {
             options.drawWorld = false;
+        } else if (arg == "--latency-log" && i + 1 < argc) {
+            options.latencyLog = std::filesystem::path(argv[++i]);
         } else {
             aurora::core::logError("app", "Unknown argument: {}", arg);
             aurora::core::logError("app", "Usage: aurora [--frames N] [--debug-overlay] [--game-dir <folder>] "
-                                          "[--screenshot <file.png>]");
+                                          "[--screenshot <file.png>] [--latency-log <file.csv>]");
             return false;
         }
     }
     return true;
 }
+
+// --latency-log: the raw section update latencies of a measured run, one CSV row per completion, written as they
+// complete (the tracker keeps only a bounded window). The last line says how many rows the file holds, how many the
+// run completed and how many were dropped before they were written; a file without it, or with a mismatch, is not
+// a whole run. tools/latency_report.py computes the run's percentiles from it.
+class LatencyRecord {
+public:
+    bool open(const std::filesystem::path& file, Clock::time_point start)
+    {
+        m_start = start;
+        m_stream.open(file, std::ios::trunc);
+        m_stream << "# aurora section update latency, milliseconds\n";
+        m_stream << "taken_ms,latency_ms,chunk_x,chunk_z,section\n";
+        return static_cast<bool>(m_stream);
+    }
+    bool isOpen() const { return m_stream.is_open(); }
+
+    void write(const std::vector<aurora::client::SectionLatencyTracker::Completion>& completions)
+    {
+        for (const auto& completion : completions) {
+            m_stream << std::format("{:.3f},{:.3f},{},{},{}\n",
+                                    std::chrono::duration<double, std::milli>(completion.takenAt - m_start).count(),
+                                    completion.milliseconds, completion.section.pos.x, completion.section.pos.z,
+                                    completion.section.section);
+            ++m_rows;
+        }
+    }
+
+    // False if the file could not be written completely.
+    bool close(const aurora::client::SectionLatencyStats& stats)
+    {
+        m_stream << std::format("# end rows={} completed={} dropped={}\n", m_rows, stats.completed,
+                                stats.unreportedDropped);
+        m_stream.close();
+        return !m_stream.fail();
+    }
+    std::uint64_t rows() const { return m_rows; }
+
+private:
+    std::ofstream m_stream;
+    Clock::time_point m_start{};
+    std::uint64_t m_rows = 0;
+};
 
 float toMilliseconds(Clock::duration duration)
 {
@@ -129,12 +184,16 @@ struct GameData {
     std::shared_ptr<const aurora::data::BlockRegistry> blocks;
     std::shared_ptr<const aurora::data::FlatPreset> flatPreset;
     std::shared_ptr<const aurora::data::PlayerMovementTuning> movement;
+    std::shared_ptr<const aurora::data::PlayerInteraction> interaction;
     std::vector<aurora::data::BlockTexture> textures;
+    std::vector<aurora::data::RgbaImage> crackStages;
+    std::vector<aurora::data::Rgb> particleColours; // By state.
     std::filesystem::path shaderFolder;
 };
 
-// Finds the game folder and loads the block data, the block textures, the flat world preset and the player
-// movement settings. Returns nullopt after logging every problem; the caller exits before any window is created.
+// Finds the game folder and loads the block data, the block textures, the flat world preset, the player movement
+// and interaction settings and the crack textures. Returns nullopt after logging every problem; the caller exits
+// before any window is created.
 std::optional<GameData> loadGameData(const LaunchOptions& options)
 {
     using namespace aurora;
@@ -172,11 +231,24 @@ std::optional<GameData> loadGameData(const LaunchOptions& options)
     data::logFlatPresetLoadResult(preset);
     const data::PlayerMovementLoadResult movement = data::loadPlayerMovement(packs);
     data::logPlayerMovementLoadResult(movement);
-    if (!preset.preset || !movement.tuning || countIssues(textures.issues, data::IssueSeverity::Error) > 0) {
+    const data::PlayerInteractionLoadResult interaction = data::loadPlayerInteraction(packs, *blocks.registry);
+    data::logPlayerInteractionLoadResult(interaction);
+    data::CrackTextureLoadResult cracks = data::loadCrackTextures(packs);
+    data::logCrackTextureLoadResult(cracks);
+    if (!preset.preset || !movement.tuning || !interaction.interaction ||
+        countIssues(textures.issues, data::IssueSeverity::Error) > 0 ||
+        countIssues(cracks.issues, data::IssueSeverity::Error) > 0) {
         return std::nullopt;
     }
-    return GameData{blocks.registry, preset.preset, movement.tuning, std::move(textures.textures),
-                    gameDirectory.path / "assets" / std::string(data::kBaseNamespace) / "shaders"};
+    std::vector<data::Rgb> particleColours = data::blockParticleColours(*blocks.registry, textures.textures);
+    return GameData{.blocks = blocks.registry,
+                    .flatPreset = preset.preset,
+                    .movement = movement.tuning,
+                    .interaction = interaction.interaction,
+                    .textures = std::move(textures.textures),
+                    .crackStages = std::move(cracks.stages),
+                    .particleColours = std::move(particleColours),
+                    .shaderFolder = gameDirectory.path / "assets" / std::string(data::kBaseNamespace) / "shaders"};
 }
 
 // The player's cursor state (Esc and clicks were handled by PlayerControl::input) reaches the window and the UI, the
@@ -204,6 +276,18 @@ void handleInput(aurora::platform::Window& window, aurora::ui::ImGuiLayer& imgui
                      .fast = window.isKeyDown(Key::LeftControl)},
                     frameSeconds);
     }
+}
+
+// The palette slot of the number key pressed in the last poll (the lowest if several), if any.
+std::optional<std::uint8_t> pressedSlot(const aurora::platform::Window& window)
+{
+    using aurora::platform::Key;
+    for (std::uint8_t slot = 0; slot < 9; ++slot) {
+        if (window.wasKeyPressed(static_cast<Key>(static_cast<int>(Key::Digit1) + slot))) {
+            return slot;
+        }
+    }
+    return std::nullopt;
 }
 
 // The local player's messages go to the integrated server's mailbox, in the order they are made.
@@ -244,6 +328,11 @@ int run(const LaunchOptions& options)
         return 1;
     }
     const data::BlockRegistry& blocks = *gameData->blocks;
+    LatencyRecord latencyRecord;
+    if (options.latencyLog && !latencyRecord.open(*options.latencyLog, Clock::now())) {
+        core::logError("app", "Cannot write the latency record {}", core::pathToUtf8(*options.latencyLog));
+        return 1;
+    }
 
     platform::Window window;
     if (!window.create(platform::WindowDesc{})) {
@@ -278,6 +367,11 @@ int run(const LaunchOptions& options)
         core::logError("render", "Cannot set up chunk rendering: {}", error);
         return 1;
     }
+    render::BlockEffectsRenderer effects;
+    if (std::string error; !effects.init(gameData->shaderFolder, gameData->crackStages, error)) {
+        core::logError("render", "Cannot set up block effects: {}", error);
+        return 1;
+    }
 
     client::Camera camera({kStartX, kStartY, kStartZ}, kStartYaw, kStartPitch);
 
@@ -289,6 +383,7 @@ int run(const LaunchOptions& options)
         .blocks = gameData->blocks,
         .flatPreset = gameData->flatPreset,
         .playerMovement = gameData->movement,
+        .playerInteraction = gameData->interaction,
         .loadRadius = kServerLoadRadius,
     });
     if (!server.start()) {
@@ -302,9 +397,25 @@ int run(const LaunchOptions& options)
     const client::ClientCollisionView collisionView(clientWorld);
     const entity::CollisionWorld collision{collisionView, collisionShapes};
     ServerPlayerMailbox playerMailbox(server);
-    client::PlayerControl player(gameData->movement, collision, playerMailbox);
+    client::PlayerControl player(gameData->movement, collision, playerMailbox,
+                                 gameData->interaction->tuning.palette.size());
     client::MeshScheduler meshScheduler(jobs, render::makeChunkMesher(meshResources),
                                         jobs.workerCount() * kMeshJobsPerWorker);
+
+    // Block actions on the client: what the look selects (the same ray as the server's, from the camera), the
+    // newest server state for the cracks, the fragments of broken blocks, and how long section updates take.
+    const data::PlayerInteractionTuning& interactionTuning = gameData->interaction->tuning;
+    const std::vector<bool> selectable = entity::selectableStates(blocks);
+    client::BlockParticles particles(interactionTuning, gameData->particleColours);
+    client::SectionLatencyTracker latency;
+    std::optional<entity::PlayerState> latestState;
+    std::optional<world::BlockPos> selected;
+    // What the log last said, so state changes are logged once (the tests read them).
+    std::optional<world::BlockPos> loggedSelection;
+    bool loggedCaptured = false;
+    bool loggedAccepting = false;
+    std::optional<render::BlockEffectsFrame::Crack> crack;
+    bool showActions = false;
 
     ui::DebugOverlay overlay;
     overlay.setVisible(options.debugOverlay);
@@ -360,6 +471,9 @@ int run(const LaunchOptions& options)
                       .focused = window.isFocused(),
                       .escapePressed = window.wasKeyPressed(platform::Key::Escape),
                       .clickPressed = window.wasMouseButtonPressed(platform::MouseButton::Left),
+                      .attackDown = window.isMouseButtonDown(platform::MouseButton::Left),
+                      .usePressed = window.wasMouseButtonPressed(platform::MouseButton::Right),
+                      .slotPressed = pressedSlot(window),
                       .uiWantsMouse = imgui.wantsMouse(),
                       .uiWantsKeyboard = imgui.wantsKeyboard(),
                       .jumpPressed = window.wasKeyPressed(platform::Key::Space),
@@ -370,14 +484,25 @@ int run(const LaunchOptions& options)
 
         {
             AURORA_PROFILE_ZONE_N("World view");
-            for (const world::ChunkUpdate& update : server.takeChunkUpdates()) {
-                clientWorld.apply(update);
+            // One frame of the server: its chunk updates and the player's state belong to the same tick.
+            server::ServerFrame frame = server.takeFrame();
+            for (const world::ChunkUpdate& update : frame.chunkUpdates) {
+                if (clientWorld.apply(update)) {
+                    latency.onApplied(update, clientWorld); // Only what the world took starts a sample.
+                }
             }
 
             // The player: the newest server state, then this frame's client ticks.
             const Clock::time_point now = Clock::now();
-            player.update(server.takePlayerState(), now, heldMovementKeys(window), static_cast<float>(camera.yaw()),
+            player.update(frame.playerState, now, heldMovementKeys(window), static_cast<float>(camera.yaw()),
                           static_cast<float>(camera.pitch()));
+            if (frame.playerState) {
+                latestState = frame.playerState;
+            }
+            for (const entity::BlockBrokenEvent& event : frame.broken) {
+                particles.add(event, clientWorld, now);
+            }
+            particles.update(now);
             if (player.localPlayer().spawned() && !player.freeFlight()) {
                 camera.setPosition(player.eyePosition(now));
             }
@@ -386,8 +511,53 @@ int run(const LaunchOptions& options)
             const world::ChunkPos center = camera.chunk();
             clientWorld.setCenter(center);
             meshScheduler.update(clientWorld, center, camera.sectionY());
+            for (const client::MeshKey& key : meshScheduler.takeFailures()) {
+                latency.onMeshFailed(key);
+            }
             chunkRenderer.queueUploads(meshScheduler.takeReady());
             chunkRenderer.update(clientWorld, kUploadBytesPerFrame);
+            const Clock::time_point taken = Clock::now();
+            for (const client::MeshKey& key : chunkRenderer.takeTaken()) {
+                latency.onGpuTaken(key, taken);
+            }
+            latency.update(clientWorld);
+            const std::vector<client::SectionLatencyTracker::Completion> completions = latency.takeCompletions();
+            if (latencyRecord.isOpen()) {
+                latencyRecord.write(completions);
+            }
+
+            // Selection lines, crosshair and cracks only while the player takes input (so never in free flight or
+            // in screenshot mode). Cracks on the server's mining target while the button is held for the game,
+            // and only on the load of the chunk the server mined in.
+            showActions = player.localPlayer().spawned() && player.accepting();
+            selected.reset();
+            crack.reset();
+            if (showActions) {
+                const entity::RaycastResult hit = entity::raycastBlocks(collisionView, selectable, camera.position(),
+                                                                        camera.forward(), interactionTuning.reach);
+                if (hit.status == entity::RaycastStatus::Hit) {
+                    selected = hit.cell;
+                }
+            }
+            if (selected != loggedSelection) {
+                loggedSelection = selected;
+                if (selected) {
+                    core::logDebug("app", "Screen selection ({}, {}, {})", selected->x, selected->y, selected->z);
+                } else {
+                    core::logDebug("app", "Screen selection none");
+                }
+            }
+            if (showActions) {
+                if (player.attackActive() && latestState && latestState->digTarget && latestState->digRequired > 0) {
+                    const auto chunk = clientWorld.snapshot(world::chunkPosOf(*latestState->digTarget));
+                    if (chunk && chunk->generation() == latestState->digGeneration) {
+                        const std::uint64_t stage = std::min<std::uint64_t>(
+                            9, 10ull * latestState->digProgress / latestState->digRequired);
+                        crack = render::BlockEffectsFrame::Crack{*latestState->digTarget,
+                                                                 static_cast<std::uint32_t>(stage)};
+                    }
+                }
+            }
         }
 
         {
@@ -395,8 +565,11 @@ int run(const LaunchOptions& options)
             renderer.clear(kSkyColor);
             const float aspect = static_cast<float>(window.framebufferWidth()) /
                                  static_cast<float>(window.framebufferHeight());
+            const std::vector<client::BlockParticles::Instance> fragments = particles.instances(Clock::now());
             if (options.drawWorld) {
                 chunkRenderer.draw(camera, aspect, farPlane);
+                effects.draw(camera, aspect, farPlane,
+                             {.outline = selected, .crack = crack, .particles = fragments});
             }
 
             // Captured before the UI is drawn, once every chunk around the camera is meshed and uploaded.
@@ -449,13 +622,31 @@ int run(const LaunchOptions& options)
                     .cursorCaptured = player.cursor().captured(),
                     .player = &player.localPlayer(),
                     .freeFlight = player.freeFlight(),
+                    .interaction = &interactionTuning,
+                    .slot = player.slot(),
+                    .selected = selected,
+                    .playerState = latestState ? &*latestState : nullptr,
+                    .particles = particles.count(),
+                    .particleStats = particles.stats(),
+                    .latency = latency.stats(),
                 };
                 if (overlay.draw(window, renderer, overlayData).toggleFreeFlight) {
                     player.setFreeFlight(!player.freeFlight()); // Switching on blocks in this frame.
                     core::logInfo("app", "Free-flying camera {}", player.freeFlight() ? "on" : "off");
                 }
             }
+            if (showActions) {
+                ui::drawCrosshair();
+            }
             imgui.endFrame();
+        }
+        if (player.cursor().captured() != loggedCaptured) {
+            loggedCaptured = player.cursor().captured();
+            core::logInfo("app", "Mouse {}", loggedCaptured ? "captured" : "released");
+        }
+        if (player.accepting() != loggedAccepting) {
+            loggedAccepting = player.accepting();
+            core::logInfo("app", "Player input {}", loggedAccepting ? "accepted" : "blocked");
         }
         cpuTimes.add(toMilliseconds(Clock::now() - frameStart));
 
@@ -475,11 +666,34 @@ int run(const LaunchOptions& options)
     if (frameCount > 0) {
         core::logInfo("app", "{} frames, avg {:.2f} ms/frame", frameCount, elapsedMs / static_cast<double>(frameCount));
     }
+    const client::SectionLatencyStats latencyStats = latency.stats();
+    if (latencyStats.completed + latencyStats.canceled + latencyStats.failed + latencyStats.pending > 0) {
+        core::logInfo("app",
+                      "Section update latency: {} done, run max {:.1f} ms; last {}: p50 {:.1f} ms, p95 {:.1f} ms; {} "
+                      "pending, {} canceled, {} failed, {} pending dropped",
+                      latencyStats.completed, latencyStats.runMaxMs, latencyStats.windowCount,
+                      latencyStats.windowP50Ms, latencyStats.windowP95Ms, latencyStats.pending, latencyStats.canceled,
+                      latencyStats.failed, latencyStats.overflowed);
+    }
+    if (latencyRecord.isOpen()) {
+        latencyRecord.write(latency.takeCompletions());
+        const std::uint64_t rows = latencyRecord.rows();
+        if (latencyRecord.close(latencyStats)) {
+            core::logInfo("app", "Section update latency record: {} rows of {} completions, {} dropped, in {}", rows,
+                          latencyStats.completed, latencyStats.unreportedDropped,
+                          core::pathToUtf8(*options.latencyLog));
+        } else {
+            core::logError("app", "Section update latency record: writing {} failed",
+                           core::pathToUtf8(*options.latencyLog));
+            exitCode = 1;
+        }
+    }
 
     // Reverse start-up order: simulation threads first (queued meshing jobs finish, their results are dropped),
     // then the GL side.
     server.stop();
     jobs.shutdown();
+    effects.shutdown();
     chunkRenderer.shutdown();
     imgui.shutdown();
     window.destroy();

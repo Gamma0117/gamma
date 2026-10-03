@@ -1,0 +1,4 @@
+# aurora section update latency, milliseconds
+taken_ms,latency_ms,chunk_x,chunk_z,section
+1000.000,10.000,0,0,8
+# end rows=1 completed=3 dropped=2

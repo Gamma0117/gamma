@@ -8,9 +8,10 @@
 namespace aurora::client {
 
 PlayerControl::PlayerControl(std::shared_ptr<const data::PlayerMovementTuning> tuning,
-                             const entity::CollisionWorld& world, PlayerMessageSink& sink)
+                             const entity::CollisionWorld& world, PlayerMessageSink& sink, std::size_t paletteSize)
     : m_world(world)
     , m_sink(sink)
+    , m_sampler(paletteSize)
     , m_player(std::move(tuning))
     , m_clock(core::kTickInterval, core::kMaxClientCatchUpTicks)
 {
@@ -45,7 +46,11 @@ bool PlayerControl::input(const PlayerFrameInput& frame)
     if (!accepting && m_sampler.accepting()) {
         block(); // Stopped this frame (UI keyboard); the events above block on their own.
     }
-    m_sampler.endFrame(accepting, frame.jumpPressed);
+    m_sampler.endFrame(accepting, {.jump = frame.jumpPressed,
+                                   .attack = frame.clickPressed,
+                                   .attackDown = frame.attackDown,
+                                   .use = frame.usePressed,
+                                   .slot = frame.slotPressed});
     return true;
 }
 

@@ -98,10 +98,11 @@ TEST_CASE("Prediction against the real server thread converges to the authoritat
 
     // A frame: world updates, the newest state, the due ticks. Walking east for the first 30 inputs.
     const auto frame = [&] {
-        for (const world::ChunkUpdate& update : server.takeChunkUpdates()) {
+        server::ServerFrame serverFrame = server.takeFrame();
+        for (const world::ChunkUpdate& update : serverFrame.chunkUpdates) {
             clientWorld.apply(update);
         }
-        if (std::optional<entity::PlayerState> state = server.takePlayerState()) {
+        if (const std::optional<entity::PlayerState>& state = serverFrame.playerState) {
             const bool first = !player.spawned();
             player.receive(*state, collision);
             newest = state;
@@ -131,7 +132,11 @@ TEST_CASE("Prediction against the real server thread converges to the authoritat
     // Stop making inputs and let the server settle all of them.
     while (std::chrono::steady_clock::now() < deadline &&
            (player.stats().lastInput < player.stats().lastSent || player.stats().history > 0)) {
-        if (std::optional<entity::PlayerState> state = server.takePlayerState()) {
+        server::ServerFrame serverFrame = server.takeFrame();
+        for (const world::ChunkUpdate& update : serverFrame.chunkUpdates) {
+            clientWorld.apply(update);
+        }
+        if (const std::optional<entity::PlayerState>& state = serverFrame.playerState) {
             player.receive(*state, collision);
             newest = state;
         }

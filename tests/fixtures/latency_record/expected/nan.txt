@@ -1,0 +1,2 @@
+INCOMPLETE (1 samples: p50 10.0 ms, p95 10.0 ms, max 10.0 ms)
+  line 4: latency nan is not a finite number >= 0

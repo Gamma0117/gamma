@@ -8,6 +8,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -91,6 +92,9 @@ enum class Behaviour {
     Sneak,    // W and Shift held.
     JumpTaps, // W held, Space tapped (pressed during one poll) every 700 ms.
     Blocks,   // W held; every second focus is lost for a frame, then a click captures again.
+    Mine,     // W held; the left button held twice (0.4..2.4 s and 3.0..3.8 s) and tapped (pressed and released in
+              // one poll) at 4.2 s.
+    UseTaps,  // W held, the right button clicked every 300 ms.
 };
 
 const char* nameOf(Behaviour behaviour)
@@ -104,6 +108,10 @@ const char* nameOf(Behaviour behaviour)
         return "jump taps";
     case Behaviour::Blocks:
         return "blocks";
+    case Behaviour::Mine:
+        return "mine";
+    case Behaviour::UseTaps:
+        return "use taps";
     }
     return "?";
 }
@@ -141,6 +149,13 @@ struct Outcome {
     std::uint64_t walkingAfterLastBlock = 0; // Applied inputs that walked after the last Neutralize arrived.
     std::uint64_t sneakFrames = 0;           // Frames drawn after the first applied input reached the client...
     std::uint64_t raisedEyeFrames = 0;       // ...of which the eyes were drawn above the sneaking eye height.
+    std::uint64_t leftPresses = 0;           // Left presses after the capture (holds and taps).
+    std::uint64_t attacksSent = 0;           // Inputs sent with attack...
+    std::uint64_t attacksApplied = 0;        // ...and applied with it: the ticks the server could mine.
+    std::uint64_t attacksAfterRelease = 0;   // Inputs sent with attack after the last release was seen.
+    std::uint64_t useClicks = 0;
+    std::uint64_t usesSent = 0;
+    std::uint64_t usesApplied = 0;
     bool converged = false;
     std::string failure; // The first broken invariant, with when it happened.
 };
@@ -223,6 +238,8 @@ Outcome simulate(const Scenario& scenario)
                                       neutralizedThrough));
             }
             outcome.jumpsApplied += intent.jump ? 1 : 0;
+            outcome.attacksApplied += intent.attack ? 1 : 0;
+            outcome.usesApplied += intent.use ? 1 : 0;
             outcome.walkingAfterLastBlock = intent.forward > 0 ? outcome.walkingAfterLastBlock + 1 : 0;
         } else if (!outcome.applied.empty() && !settling) {
             outcome.neutralTickNumbers.push_back(outcome.serverTicks);
@@ -242,6 +259,12 @@ Outcome simulate(const Scenario& scenario)
     const double sneakEye = tuning->sneakEyeHeight;
     TickScheduler::TimePoint nextTap = start + 400ms;
     TickScheduler::TimePoint nextBlock = start + 1000ms;
+    TickScheduler::TimePoint nextUse = start + 300ms;
+    // Mine: the held spans and the tap, in order.
+    const std::array<std::pair<Micros, Micros>, 3> holds{{{400ms, 2400ms}, {3000ms, 3800ms}, {4200ms, 4200ms}}};
+    std::size_t hold = 0;
+    bool leftHeld = false;
+    std::size_t sentBeforeRelease = 0; // Inputs sent when the last release was seen.
     bool regainFocus = false;
     std::size_t frameIndex = 0;
     while (true) {
@@ -266,6 +289,28 @@ Outcome simulate(const Scenario& scenario)
             events.jumpPressed = true;
             ++outcome.taps;
             nextTap += 700ms;
+        }
+        if (scenario.behaviour == Behaviour::Mine && hold < holds.size()) {
+            const auto [pressAt, releaseAt] = holds[hold];
+            if (!leftHeld && now >= start + pressAt) {
+                events.clickPressed = true;
+                ++outcome.leftPresses;
+                leftHeld = pressAt != releaseAt; // A tap goes down and up within the poll.
+                if (!leftHeld) {
+                    ++hold;
+                    sentBeforeRelease = mailbox.inputs.size() + 1; // The tap's tick may still attack once.
+                }
+            } else if (leftHeld && now >= start + releaseAt) {
+                leftHeld = false;
+                ++hold;
+                sentBeforeRelease = mailbox.inputs.size();
+            }
+        }
+        events.attackDown = leftHeld;
+        if (scenario.behaviour == Behaviour::UseTaps && now >= nextUse && now + 500ms < end) {
+            events.usePressed = true;
+            ++outcome.useClicks;
+            nextUse += 300ms;
         }
         if (scenario.behaviour == Behaviour::Blocks) {
             if (regainFocus) {
@@ -309,8 +354,14 @@ Outcome simulate(const Scenario& scenario)
     outcome.dropped = server.stats().droppedInputs;
     outcome.resyncs = stats.resyncs;
     outcome.lastSent = stats.lastSent;
-    for (const aurora::entity::PlayerInput& input : mailbox.inputs) {
-        outcome.jumpsSent += input.intent.jump ? 1 : 0;
+    for (std::size_t i = 0; i < mailbox.inputs.size(); ++i) {
+        const MovementIntent& intent = mailbox.inputs[i].intent;
+        outcome.jumpsSent += intent.jump ? 1 : 0;
+        outcome.attacksSent += intent.attack ? 1 : 0;
+        outcome.usesSent += intent.use ? 1 : 0;
+        if (scenario.behaviour == Behaviour::Mine && hold == holds.size() && i >= sentBeforeRelease) {
+            outcome.attacksAfterRelease += intent.attack ? 1 : 0;
+        }
     }
     for (const PlayerMessage& message : mailbox.messages) {
         outcome.neutralizeMessages += message.kind == PlayerMessage::Kind::Neutralize ? 1 : 0;
@@ -364,6 +415,20 @@ void checkBehaviour(const Scenario& scenario, const Outcome& outcome)
     case Behaviour::Blocks:
         CHECK(outcome.neutralizeMessages >= 3);
         CHECK(outcome.walkingAfterLastBlock > 0); // Captured again, the player walks again.
+        break;
+    case Behaviour::Mine:
+        CHECK(outcome.leftPresses == 3);
+        // 2.8 s held is about 56 ticks of attack, plus one for the tap; a frame of up to 70 ms sees each press and
+        // release up to a tick or so late.
+        CHECK(outcome.attacksSent >= 52);
+        CHECK(outcome.attacksSent <= 60);
+        CHECK(outcome.attacksApplied == outcome.attacksSent); // Mining time is the applied attack inputs.
+        CHECK(outcome.attacksAfterRelease == 0);
+        break;
+    case Behaviour::UseTaps:
+        CHECK(outcome.useClicks >= 10);
+        CHECK(outcome.usesSent == outcome.useClicks); // Every click once (clicks are more than a tick apart)...
+        CHECK(outcome.usesApplied == outcome.usesSent); // ...and applied once.
         break;
     }
 }
@@ -456,9 +521,20 @@ TEST_CASE("Input blocking with controlled frame rates neutralises in time", "[cl
     checkControlled(Behaviour::Blocks);
 }
 
+TEST_CASE("Mining with controlled frame rates attacks exactly while held", "[client][player][loop][action]")
+{
+    checkControlled(Behaviour::Mine);
+}
+
+TEST_CASE("Use taps with controlled frame rates use once each", "[client][player][loop][action]")
+{
+    checkControlled(Behaviour::UseTaps);
+}
+
 TEST_CASE("Late frames keep every invariant", "[client][player][loop][sneak]")
 {
-    for (const Behaviour behaviour : {Behaviour::Walk, Behaviour::Sneak, Behaviour::JumpTaps, Behaviour::Blocks}) {
+    for (const Behaviour behaviour : {Behaviour::Walk, Behaviour::Sneak, Behaviour::JumpTaps, Behaviour::Blocks,
+                                      Behaviour::Mine, Behaviour::UseTaps}) {
         checkLateFrames(behaviour);
     }
 }
@@ -505,7 +581,8 @@ TEST_CASE("Loop simulation report", "[.][loop-report]")
     std::printf("%-34s %-9s %5s %9s %8s %8s %8s %8s %7s %6s %7s\n", "timeline", "behaviour", "runs", "neutral>0",
                 "maxNeut", "avgCorr", "maxPend", "maxHist", "dropped", "resync", "raised");
     for (const auto& [timeline, duration] : timelines) {
-        for (const Behaviour behaviour : {Behaviour::Walk, Behaviour::Sneak, Behaviour::JumpTaps, Behaviour::Blocks}) {
+        for (const Behaviour behaviour : {Behaviour::Walk, Behaviour::Sneak, Behaviour::JumpTaps, Behaviour::Blocks,
+                                          Behaviour::Mine, Behaviour::UseTaps}) {
             std::uint64_t runs = 0, withNeutral = 0, maxNeutral = 0, corrections = 0, dropped = 0, resyncs = 0,
                           raised = 0;
             std::size_t maxPending = 0, maxHistory = 0;

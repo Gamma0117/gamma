@@ -45,6 +45,9 @@ void MeshScheduler::update(ClientWorld& world, world::ChunkPos cameraChunk, std:
             addChunk(world, pos);
         }
     }
+    for (const SectionKey& key : world.takeChangedSections()) {
+        renewSection(world, key);
+    }
     collect(world);
     submit(world, cameraChunk, cameraSection);
 }
@@ -81,6 +84,7 @@ MeshSchedulerStats MeshScheduler::stats() const
     }
     stats.inFlight = m_inFlight.size();
     stats.ready = m_ready.size();
+    stats.stale = m_staleResults;
     return stats;
 }
 
@@ -99,7 +103,7 @@ void MeshScheduler::forgetChunk(world::ChunkPos pos)
     for (std::int32_t section = 0; section < core::kSectionsPerChunk; ++section) {
         m_records.erase(SectionKey{pos, section});
     }
-    std::erase_if(m_ready, [pos](const ReadyMesh& ready) { return ready.key.section.pos == pos; });
+    m_staleResults += std::erase_if(m_ready, [pos](const ReadyMesh& ready) { return ready.key.section.pos == pos; });
 }
 
 void MeshScheduler::addChunk(const ClientWorld& world, world::ChunkPos pos)
@@ -116,6 +120,22 @@ void MeshScheduler::addChunk(const ClientWorld& world, world::ChunkPos pos)
     }
 }
 
+void MeshScheduler::renewSection(const ClientWorld& world, const SectionKey& key)
+{
+    m_records.erase(key);
+    m_staleResults += std::erase_if(m_ready, [&key](const ReadyMesh& ready) { return ready.key.section == key; });
+    const std::optional<MeshKey> current = world.currentKey(key);
+    if (!current) {
+        return; // Not held or not eligible: nothing is drawn for it.
+    }
+    if (world.snapshot(key.pos)->section(key.section) == nullptr) {
+        m_records[key] = Record{*current, State::Ready};
+        m_ready.push_back({*current, MeshData{}});
+        return;
+    }
+    m_records[key] = Record{*current, State::Waiting};
+}
+
 void MeshScheduler::collect(const ClientWorld& world)
 {
     for (auto job = m_inFlight.begin(); job != m_inFlight.end();) {
@@ -126,6 +146,7 @@ void MeshScheduler::collect(const ClientWorld& world)
         const MeshKey key = job->key;
         const auto record = m_records.find(key.section);
         const bool current = record != m_records.end() && record->second.key == key && world.isCurrent(key);
+        m_staleResults += current ? 0 : 1;
         try {
             MeshData mesh = job->result.get();
             if (current) {
@@ -136,11 +157,13 @@ void MeshScheduler::collect(const ClientWorld& world)
         } catch (const std::exception& e) {
             if (current) {
                 record->second.state = State::Failed;
+                m_failures.push_back(key);
                 core::logError("client", "Meshing {} failed: {}", describe(key.section), e.what());
             }
         } catch (...) {
             if (current) {
                 record->second.state = State::Failed;
+                m_failures.push_back(key);
                 core::logError("client", "Meshing {} failed: unknown exception", describe(key.section));
             }
         }
@@ -181,6 +204,7 @@ void MeshScheduler::submit(const ClientWorld& world, world::ChunkPos cameraChunk
             m_jobs.async([function = m_meshFunction, input = std::move(input)] { return function(input); });
         if (!result.valid()) {
             record.state = State::Failed;
+            m_failures.push_back(record.key);
             core::logError("client", "Meshing {} failed: the job system is not accepting jobs",
                            describe(waiting[i]));
             continue;

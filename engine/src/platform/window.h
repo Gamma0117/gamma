@@ -45,6 +45,8 @@ public:
     // True if the key went down during the last pollEvents()/waitEvents(). Auto-repeat does not count.
     bool wasKeyPressed(Key key) const { return m_input.wasKeyPressed(key); }
     bool wasMouseButtonPressed(MouseButton button) const { return m_input.wasButtonPressed(button); }
+    // Whether the button is held right now (as isKeyDown for keys).
+    bool isMouseButtonDown(MouseButton button) const;
 
     // Latest cursor position in window pixels, and whether it changed during the last poll. While the cursor is
     // captured it keeps growing without bounds (relative movement).

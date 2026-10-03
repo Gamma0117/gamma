@@ -1,6 +1,7 @@
 #include "client/camera.h"
 
 #include "core/constants.h"
+#include "entity/block_raycast.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -59,9 +60,7 @@ void Camera::move(const MoveInput& input, double frameSeconds)
 
 glm::dvec3 Camera::forward() const
 {
-    const double yaw = glm::radians(m_yaw);
-    const double pitch = glm::radians(m_pitch);
-    return {std::sin(yaw) * std::cos(pitch), std::sin(pitch), -std::cos(yaw) * std::cos(pitch)};
+    return entity::lookDirection(m_yaw, m_pitch);
 }
 
 world::ChunkPos Camera::chunk() const

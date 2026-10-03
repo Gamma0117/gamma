@@ -61,6 +61,10 @@
      - 한 칸 높이의 블록은 점프해서 오른다. 두 칸 벽은 넘지 못한다. 0.6블록 이하의 턱(반블록·계단)은 걸어서 저절로 오르지만, 그런 블록은 아직 없어 화면에서는 볼 수 없다(테스트로 확인했고, 부분 블록 작업에서 화면으로 확인한다).
      - **Esc**를 누르면 마우스가 풀리고 플레이어는 멈춘다(공중이었다면 떨어져 착지). 다른 창으로 전환하거나 최소화해도 같다. 아직 메뉴·일시정지가 아니라서 서버는 계속 돈다.
      - **자유 비행(디버그)**: Esc로 마우스를 놓고 F3 화면의 `Free-flying camera (debug)`를 체크한 뒤, 지형을 클릭해 다시 잡는다. P0-5처럼 날아다닌다(Space·Shift 위아래, Ctrl 4배). 플레이어는 그 자리에 서 있고, 체크를 풀면 카메라가 플레이어 눈으로 돌아온다. 아주 멀리 날아가면 플레이어가 있는 청크가 내려가 F3에 `FROZEN`이 뜨고, 체크를 풀면 다시 불러와 풀린다.
+     - **블록 부수기·놓기** (P0-7): 마우스가 잡혀 있으면 화면 가운데에 작은 십자가 보이고, 손이 닿는 블록(5블록 안)의 테두리에 검은 선이 그려진다. 시작 자리에서는 바로 앞 풀 블록이 선택된다.
+       - **좌클릭을 누르고 있으면** 선택한 블록에 금이 점점 늘다가(10단계) 부서지고, 블록 색의 작은 조각들이 튀었다가 떨어진다. 풀은 0.3초, 돌 0.75초, 통나무·판자·조약돌 1초. 도중에 떼면 금이 사라지고 블록은 그대로다. 마우스를 잡는 첫 클릭은 공격이 아니라서, 잡은 뒤 다시 눌러야 부서지기 시작한다.
+       - **숫자 키 1~6**으로 놓을 블록을 고르고(1 돌, 2 흙, 3 풀, 4 조약돌, 5 통나무, 6 판자. 인벤토리가 생기기 전의 임시 팔레트로 `player/interaction.json`에 있다), **우클릭**하면 선택한 면 앞 칸에 놓인다. 통나무는 누운 방향이 클릭한 면을 따른다(옆면에 놓으면 눕고, 나이테가 그 면 쪽을 본다). 플레이어 몸과 겹치는 칸에는 놓이지 않는다.
+       - y −49 ~ 299 사이에서만 부수고 놓는다. Esc로 마우스를 놓거나 다른 창으로 가면 금·선·십자가 사라지고 부수던 진행도 처음부터다. 자유 비행 중에는 블록 행동을 하지 않는다.
      - **시험 코스**: 시작 위치에서 뒤로 돌아(남쪽) 몇 걸음 가면 있다. 조약돌 계단 3단(x 0~2, 점프로 한 칸씩), 판자 두 칸 벽(x 5~7, 넘지 못함), 높이 두 칸 통로(x −5, 그냥 지나감), 두 칸 깊이 구덩이(x 9~11, 안쪽 디딤돌을 밟고 점프해 나옴).
      - 창을 닫으려면 창의 X 버튼을 누른다.
    - **F3**을 누르면 왼쪽 위에 반투명 디버그 화면이 뜬다.
@@ -69,17 +73,22 @@
      - `Chunks 361 loaded, 0 pending, 0 failed`: 서버가 카메라 둘레 반경 9(19×19)에 만든 평지 청크 수. 그리는 범위(반경 8)보다 한 칸 넓게 불러와서, 그려지는 청크는 모두 이웃이 있다. 움직이는 동안에는 한 칸 더 유지하기 때문에 361보다 많을 수 있다
      - `XYZ`, `chunk`, `section`: 카메라 위치와 그 청크·섹션. `Facing north (yaw …, pitch …)`: 바라보는 방향(yaw 0 = 북쪽, 90 = 동쪽)
      - `Render distance 8: N chunks held, 289 drawable`: 클라이언트가 받은 청크 수와, 그중 그릴 수 있는 청크 수(반경 8 안이고 8방향 이웃이 모두 있음)
-     - `Meshes 289 done, … empty, 0 waiting, 0 in flight, 0 failed`: 섹션 메시 상태. 평지는 청크마다 지표 섹션 하나에 면이 있고, 땅속 섹션은 면이 없어서 `empty`다
-     - `GPU 289 sections, 1156 vertices, … MB, 0 to upload`와 `drawn N sections in N calls`: GPU에 올라간 메시와, 카메라 시야(절두체) 안이라 실제로 그린 섹션 수
+     - `Meshes 289 done, … empty, 0 waiting, 0 in flight, 0 failed, N stale`: 섹션 메시 상태. 평지는 청크마다 지표 섹션 하나에 면이 있고, 땅속 섹션은 면이 없어서 `empty`다. `stale`은 만드는 사이에 입력(블록·이웃·거리)이 바뀌어 버린 결과의 누적 수(움직이거나 블록을 바꾸면 늘 수 있다)
+     - `GPU 289 sections, 1156 vertices, … MB, 0 to upload, N stale dropped`(올리기 전에 낡아서 버린 메시의 누적 수)와 `drawn N sections in N calls`: GPU에 올라간 메시와, 카메라 시야(절두체) 안이라 실제로 그린 섹션 수
      - 마지막 줄: 마우스가 잡혔는지(`Mouse captured (Esc releases)`) 아닌지
      - `Free-flying camera (debug)` 체크박스와 `Player …`: 플레이어 발 위치, 수평 속도(걷기 4.30, 달리기 5.60)·수직 속도, 땅에 있는지, `sneaking`/`sprinting`(Shift·Ctrl+W 중일 때). `inputs sent / settled / unsettled`: 보낸 입력 수, 서버가 처리를 끝낸 번호, 아직 처리되지 않은 입력 수(보통 1~3). `corrections`(서버 결과로 위치를 고친 횟수, 보통 0이고 포커스를 잃는 순간 1 정도 늘 수 있음), `pauses`·`resyncs`(서버가 멈췄을 때만 늘어남). `server: waiting … starved … filling … dropped … late … before spawn …`: 서버 쪽 입력 대기열 상태(평소 `starved 1, filling 1, dropped 0, late 0, before spawn 0`. `late`는 스폰 뒤 늦게 오거나 중복된 입력만 센다)
+     - `Palette (1-9): >1 stone  2 dirt …`: 숫자 키 팔레트와 고른 칸(`>`). `Looking at x / y / z`: 지금 선택된 블록(손 닿는 곳에 없으면 `nothing in reach`). `Mining x / y / z: n of m ticks`: 서버가 센 채굴 진행(없으면 `Mining nothing`). `Last place (input N): placed` 등: 마지막 우클릭의 서버 결과(`no target`, `occupied`, `blocks the player`, `outside the editable height` …)와 `server: broken N, placed N of N attempts`
+     - `Fragments N (too old …, other load …, dropped …)`: 지금 보이는 파편 수와, 너무 늦게 와서·다른 로드의 청크라서·상한을 넘어서 만들지 않거나 지운 수
+     - `Section update latency (ms): last 32 mean … max …; last 256 p50 … p95 … max …`와 `run: done N, max …; pending …, canceled …, failed …, pending dropped …`: 블록이 바뀐 섹션이 서버에서 발행된 뒤 그 내용이 GPU에 반영되기까지 걸린 시간(이웃 섹션의 그늘 갱신은 세지 않음). 평균·분위수는 가장 최근 완료 32개·256개만 보고, 실행 전체에서는 완료 수와 최댓값만 센다(메모리와 계산이 실행 시간에 따라 늘지 않게). 클라우드의 소프트웨어 렌더링(Xvfb·llvmpipe)에서는 10~20ms였다
      - `Workers N`: 워커 스레드 수(논리 프로세서 수 − 2, 최소 1)
      - `Blocks 8 (10 states)`: 읽어 들인 블록 수(내장 공기·unknown 포함)와 블록 상태 수
      - 창 크기, VSync 체크박스(끄면 FPS가 크게 오르지만 서버는 20 TPS 그대로), OpenGL 버전(`4.5` 이상, Core Profile), GPU 이름, Tracy 상태
    - F3을 다시 누르면 사라진다. 누르고 있어도 한 번만 바뀐다.
    - 창 가장자리를 끌어 크기를 바꿔도 배경이 늘어나거나 깨지지 않고, 디버그 화면의 창 크기가 바뀐다.
    - 콘솔에 `Loaded 8 block textures (32x32 PNG)`, `Flat world preset: 3 layers, 128 blocks high (top layer ends at y 63), 9 boxes`, `Player movement: 0.6 x 1.8 blocks, walk 4.3 / sprint 5.6 / sneak 1.3 blocks per second`, `Player spawned at (0.50, 64.00, 0.50)`와 `Spawn area ready after … ms: 361 chunks loaded, 0 failed`가 찍힌다.
-   - 창의 X 버튼으로 닫으면 콘솔에 `[INFO ] [app] (Main) N frames, avg … ms/frame`과 `Server thread stopped: … last measured 20.0x TPS` 같은 로그가 찍히고, 마지막 줄은 `Exiting with code 0`이다.
+   - Debug 빌드에서는 블록을 부수거나 놓을 때마다 콘솔에 `Broke aurora:grass_block at (0, 63, -3) on tick … after 6 ticks of attack`, `Place by input … with palette key 1: placed` 같은 줄이 찍힌다. 화면 선택이 바뀌면 `Screen selection (x, y, z)`, 서버가 새 칸을 캐기 시작하면 `Mining aurora:… at (x, y, z) from input N`도 찍힌다(화면 선택과 서버 대상이 다른 때를 확인하는 용도). 마우스를 잡고 놓을 때 `Mouse captured`/`Mouse released`, 플레이어 입력이 켜지고 꺼질 때 `Player input accepted`/`Player input blocked`는 빌드와 상관없이 찍힌다.
+   - **지연 측정**: `aurora --latency-log latency.csv`로 실행하면 섹션 갱신 반영 지연을 완료될 때마다 한 줄씩 파일에 쓰고, 정상 종료 때 마지막 줄에 줄 수·완료 수·빠진 수를 적는다. 실행 전체의 p50·p95·최대는 `python tools/latency_report.py latency.csv`로 계산한다(마지막 줄이 없거나 수가 맞지 않거나, 지연 값이 유한한 0 이상의 수가 아닌 줄(NaN·무한대·음수)이 있으면 그 줄을 빼고 `INCOMPLETE`로 알리며 종료 코드 2. 0ms는 정상 값이다).
+   - 창의 X 버튼으로 닫으면 콘솔에 블록을 바꾼 적이 있으면 `Section update latency: N done, run max … ms; last 256: p50 … ms, …` 줄과 `[INFO ] [app] (Main) N frames, avg … ms/frame`과 `Server thread stopped: … last measured 20.0x TPS` 같은 로그가 찍히고, 마지막 줄은 `Exiting with code 0`이다.
 
 ### 게임 데이터 (블록 JSON, 텍스처, 평지 프리셋, 쉐이더)
 

@@ -132,4 +132,5 @@ TEST_CASE("A stale empty result never reaches the GPU table", "[render][upload]"
     UploadQueue queue;
     queue.push({ReadyMesh{stale, {}}});
     CHECK(queue.take(world, 1 << 20).empty());
+    CHECK(queue.dropped() == 1);
 }

@@ -1,5 +1,0 @@
-{
-  "id": "aurora:stone",
-  "hardness": 1.5,
-  "textures": { "all": "block/stone" }
-}

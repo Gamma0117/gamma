@@ -74,6 +74,28 @@ std::optional<std::vector<std::byte>> readFileBytes(const std::filesystem::path&
     return bytes;
 }
 
+std::optional<RgbaImage> readBlockTextureFile(const std::filesystem::path& file, std::vector<LoadIssue>& issues)
+{
+    std::string error;
+    const std::optional<std::vector<std::byte>> bytes = readFileBytes(file, error);
+    if (!bytes) {
+        issues.push_back({IssueSeverity::Error, file, {}, error});
+        return std::nullopt;
+    }
+    DecodeResult decoded = decodePng(*bytes);
+    if (!decoded.image) {
+        issues.push_back({IssueSeverity::Error, file, {}, decoded.error});
+        return std::nullopt;
+    }
+    if (decoded.image->width != kBlockTextureSize || decoded.image->height != kBlockTextureSize) {
+        issues.push_back({IssueSeverity::Error, file, {},
+                          std::format("a block texture must be {0}x{0} pixels, this one is {1}x{2}",
+                                      kBlockTextureSize, decoded.image->width, decoded.image->height)});
+        return std::nullopt;
+    }
+    return std::move(decoded.image);
+}
+
 BlockTextureLoadResult loadBlockTextures(const BlockRegistry& registry,
                                          const std::map<std::string, std::filesystem::path, std::less<>>& files)
 {
@@ -98,25 +120,9 @@ BlockTextureLoadResult loadBlockTextures(const BlockRegistry& registry,
             continue;
         }
         const std::filesystem::path& file = found->second;
-        std::string error;
-        const std::optional<std::vector<std::byte>> bytes = readFileBytes(file, error);
-        if (!bytes) {
-            result.issues.push_back({IssueSeverity::Error, file, {}, error});
-            continue;
+        if (std::optional<RgbaImage> image = readBlockTextureFile(file, result.issues)) {
+            textures.push_back({*ResourceId::parse(id), file, std::move(*image)});
         }
-        DecodeResult decoded = decodePng(*bytes);
-        if (!decoded.image) {
-            result.issues.push_back({IssueSeverity::Error, file, {}, decoded.error});
-            continue;
-        }
-        if (decoded.image->width != kBlockTextureSize || decoded.image->height != kBlockTextureSize) {
-            result.issues.push_back(
-                {IssueSeverity::Error, file, {},
-                 std::format("a block texture must be {0}x{0} pixels, this one is {1}x{2}", kBlockTextureSize,
-                             decoded.image->width, decoded.image->height)});
-            continue;
-        }
-        textures.push_back({*ResourceId::parse(id), file, std::move(*decoded.image)});
     }
 
     if (countIssues(result.issues, IssueSeverity::Error) == 0) {

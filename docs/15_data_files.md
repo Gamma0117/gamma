@@ -11,7 +11,7 @@ game/
     buildings/ jobs/ traits/ laws/ monsters/ bosses/ loot/
     factions/ events/ biomes/ structures/ vehicles/ parts/
     worldgen/                ← 월드 생성 설정 (P0-4: flat.json)
-    player/                  ← 플레이어 설정 (P0-6: movement.json)
+    player/                  ← 플레이어 설정 (P0-6: movement.json, P0-7: interaction.json)
   assets/aurora/
     textures/{block,item,entity,particle,ui}/
     models/ animations/ sounds/ shaders/ lang/
@@ -45,6 +45,9 @@ game/
 - **텍스처**: 면마다 `north`/`south`/`east`/`west` → `side` → `all`, 위·아래는 `top`/`bottom` → `all` 순서로 찾고, 여섯 면이 모두 정해져야 한다. `emissive`는 선택. 값은 `[네임스페이스:]경로`이고, 네임스페이스를 빼면 **블록 파일이 들어 있는 `data/<ns>` 폴더의 ns**를 쓴다(블록 ID의 ns가 아님). 파일은 `assets/<ns>/textures/<경로>.png`를 나중에 읽는 묶음부터 찾으며, 없으면 오류.
 - **텍스처 이미지** (P0-5): 블록 로더가 찾은 바로 그 파일을 창을 띄우기 전에 읽어 검사한다(묶음을 다시 찾지 않으므로, 나중 묶음의 파일이 깨졌으면 앞 묶음으로 넘어가지 않고 오류). PNG만 받는다(파일 첫 8바이트가 PNG 서명이어야 함). 블록 면 텍스처는 정확히 32×32이고, 아니면 파일과 실제 크기를 알리는 오류다. 오류가 있으면 블록 데이터처럼 종료 코드 1. `emissive` 이미지는 쉐이더 단계(P0-10)에서 읽는다. 면 텍스처가 없는 상태(내장 `aurora:unknown`)는 자홍·검정 체크무늬 "없음" 텍스처로 그린다.
 - **쉐이더** (P0-5): `assets/aurora/shaders/chunk.vert`, `chunk.frag`(GLSL 4.50)를 기본 게임 묶음에서 읽는다. 컴파일 오류는 파일과 드라이버 로그를 남기고 종료 코드 1. 모드가 쉐이더를 바꾸는 규칙과 실행 중 다시 읽기는 P0-10에서 정한다.
+- **`axis` 속성** (P0-7): 블록 파일의 면 텍스처는 `axis=y`(세운 통나무) 기준으로 적는다. `states`에 `axis`(`x`/`y`/`z`)가 있는 블록은 다른 값에서 `top`/`bottom` 텍스처가 축 방향의 두 면으로 가고, 나머지 네 면은 `side`를 결이 축을 따르도록 돌려 붙인다(`x`: 동·서 면이 끝면, `z`: 남·북 면이 끝면). 설치할 때 축은 클릭한 면의 방향으로 정한다(위·아래 면 → `y`, 동·서 → `x`, 남·북 → `z`). `axis` 속성이 없는 블록은 그대로 그린다.
+- **금 텍스처** (P0-7): `assets/aurora/textures/block/destroy_stage_0.png` ~ `destroy_stage_9.png` 10장. 블록 면 텍스처와 같은 규칙(PNG, 정확히 32×32, 나중 묶음의 파일이 앞 묶음 것을 대신함)으로 창을 띄우기 전에 읽고, 없거나 틀리면 오류(종료 코드 1). 알파 그대로 블록 위에 덮으므로 투명한 텍셀은 블록을 그대로 둔다.
+- **파편 색** (P0-7): 블록마다 북쪽 면 텍스처(`axis` 블록은 `axis=y`의 옆면)의 알파 128 이상 텍셀 평균 RGB. 그런 텍셀이 없으면 자홍(255, 0, 255).
 - **나중 단계에서 읽는 필드**: `tool`, `min_tool_rank`, `drops`(P1), `generation`(P0-8)은 지금은 의미를 검사하지 않고 받아 둔다. JSON 문법이 틀리면 지금도 오류다. 그 밖의 모르는 필드는 경고(오타 확인용).
 - **상태 ID**: 속성 값 조합마다 16비트 번호를 붙인다. 공기 0, unknown 1이 먼저이고, 나머지는 덮어쓰기까지 끝난 최종 블록을 ID 순으로 정렬해 번호를 매긴다. 전체 65,536개(데이터 블록 65,534개)를 넘으면 오류. 이 번호는 실행 중에만 쓰고 저장하지 않는다. 저장·전송에는 상태 문자열 `aurora:oak_log[axis=y]`(속성 이름순, 속성 없으면 `aurora:stone`)을 쓴다.
 
@@ -119,6 +122,42 @@ game/
 - 모든 필드가 필요하고 유한한 숫자여야 한다(정수도 됨). 범위를 벗어나면 필드의 JSON 포인터와 함께 오류, 모르는 필드는 경고다. 오류가 하나라도 있으면 창을 만들기 전에 종료 코드 1.
 - 폭·키의 하한 0.1은 충돌의 허용 오차(1e-7블록)보다 충분히 커서, 상자가 덮는 칸의 범위가 비지 않게 하려는 것이다.
 - 이 수치는 서버와 클라이언트(예측)가 똑같이 쓴다. 한 틱의 계산 순서는 `engine/src/entity/player_movement.h`의 `stepPlayer` 설명을 따른다.
+
+## 블록 부수기·놓기 (`player/interaction.json`, P0-7)
+
+손 닿는 거리, 부수는 시간, 숫자 키로 고르는 블록(P0 전용 팔레트), 파편 수치. `movement.json`처럼 파일 하나를 통째로 쓰고, 나중 묶음의 파일이 앞 것을 대신하며, 어느 묶음에도 없으면 오류다.
+
+```json
+{
+  "reach": 5.0,
+  "mining_seconds_per_hardness": 0.5,
+  "palette": [
+    "aurora:stone", "aurora:dirt", "aurora:grass_block",
+    "aurora:cobblestone", "aurora:oak_log", "aurora:oak_planks"
+  ],
+  "particle_count": 12,
+  "particle_lifetime": 0.6,
+  "particle_gravity": 32.0,
+  "particle_speed": 2.0,
+  "particle_size": 0.06,
+  "max_particles": 512
+}
+```
+
+| 필드 | 범위 | 뜻 |
+| --- | --- | --- |
+| `reach` | 0.1 ~ 16 | 눈에서 맞은 면까지의 최대 거리(블록) |
+| `mining_seconds_per_hardness` | 0 초과 ~ 30 | P0 규칙: 경도 1인 블록을 부수는 데 걸리는 공격 유지 시간(초) |
+| `palette` | 블록 ID 1~9개 | 숫자 키 1~9에 차례로 대응. `aurora:stone`처럼 `ns:block`으로 적고 각 블록의 기본 상태를 놓는다. 없는 블록, `aurora:air`, `aurora:unknown`, 같은 블록 두 번, 상태 문자열(`[...]`)은 오류 |
+| `particle_count` | 정수 8 ~ 16 | 부서진 블록 하나의 파편 수 |
+| `particle_lifetime` | 0 초과 ~ 5 | 파편이 보이는 시간(초). 서버에서 부서진 시각부터 센다 |
+| `particle_gravity` | 0 ~ 200 | 블록/초² |
+| `particle_speed` | 0 ~ 20 | 처음 속도의 최댓값(블록/초) |
+| `particle_size` | 0 초과 ~ 0.25 | 파편 정사각형 한 변(블록) |
+| `max_particles` | 정수 16 ~ 4096 | 클라이언트에 동시에 있는 파편 수 상한. 넘으면 오래된 것부터 지운다 |
+
+- 모든 필드가 필요하고, 범위 밖·JSON 포인터와 함께 오류, 같은 키 두 번은 오류, 모르는 필드는 경고다. 오류가 있으면 창을 만들기 전에 종료 코드 1.
+- **부수는 틱 수**: `max(1, ceil(경도 × mining_seconds_per_hardness × 20))`. 경도는 블록 파일의 float 값이고 곱은 double로 계산하며, float로 저장된 경도의 반올림 오차만큼 정수를 살짝 넘은 값은 그 정수로 친다(0.6 × 0.5 × 20 = 6틱, 7틱이 아님). 소수 몇 자리 계수(0.001 ~ 2.0 사이 시험한 16가지)에서는 십진 곱과 같은 틱이 나오지만, 일반적으로 JSON에 적은 십진수를 되살리지는 않는다(예: 경도 1 × 계수 0.050000001은 1틱). 100만 틱을 넘는 블록은 부술 수 없고 경고로 알린다. `unbreakable` 블록·공기·unknown은 부술 수 없다.
 
 ## 예시
 

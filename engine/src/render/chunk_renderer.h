@@ -11,9 +11,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <span>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace aurora::client {
@@ -30,6 +32,8 @@ struct ChunkRenderStats {
     std::size_t gpuBytes = 0;
     std::size_t drawnSections = 0; // In the last draw, after frustum culling.
     std::size_t drawCalls = 0;
+    std::uint64_t staleUploads = 0;  // Queued meshes dropped as stale so far (UploadQueue::dropped).
+    std::uint64_t uploadedBytes = 0; // Mesh data uploaded so far.
 };
 
 // GPU side of the chunk meshes: one buffer per section (vertices, then uint32 indices), drawn one call per
@@ -63,6 +67,11 @@ public:
     void draw(const client::Camera& camera, float aspect, float farPlane);
 
     std::size_t pendingUploads() const { return m_uploads.size(); }
+    // The key of the mesh the section holds on the GPU, if any.
+    std::optional<client::MeshKey> meshKeyOf(const client::SectionKey& section) const;
+    // The keys of the results update() took into the table since the last call: uploads and empty results (also
+    // when the section held nothing), in order.
+    std::vector<client::MeshKey> takeTaken() { return std::exchange(m_taken, {}); }
     ChunkRenderStats stats() const;
 
 private:
@@ -85,8 +94,10 @@ private:
     std::int32_t m_sectionOffsetLocation = -1;
     std::unordered_map<client::SectionKey, GpuMesh, client::SectionKeyHash> m_meshes;
     UploadQueue m_uploads;
+    std::vector<client::MeshKey> m_taken;
     std::size_t m_drawnSections = 0;
     std::size_t m_drawCalls = 0;
+    std::uint64_t m_uploadedBytes = 0;
 };
 
 } // namespace aurora::render

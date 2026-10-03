@@ -185,6 +185,7 @@ TEST_CASE("Stale results are dropped and never handed over", "[client][mesh]")
     fixture.settle(scheduler);
     CHECK(scheduler.stats().inFlight == 0);
     CHECK(scheduler.stats().failed == 0);
+    CHECK(scheduler.stats().stale > 0); // The results made for the old inputs were dropped, and counted.
 }
 
 TEST_CASE("Stale jobs keep their slots until they finish", "[client][mesh]")
@@ -226,6 +227,7 @@ TEST_CASE("A ready mesh that loses eligibility before it is taken is dropped", "
     scheduler.update(fixture.world, {4, 0}, 7);
     CHECK(scheduler.takeReady().empty());
     CHECK(scheduler.stats().ready == 0);
+    CHECK(scheduler.stats().stale == 9);
 }
 
 TEST_CASE("A failed mesh is not retried until its inputs change", "[client][mesh]")

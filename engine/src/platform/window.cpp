@@ -19,9 +19,10 @@ constexpr int kGlMinor = 5;
 
 // GLFW key code for each Key, indexed by the enum value.
 constexpr std::array<int, kKeyCount> kGlfwKeys{
-    GLFW_KEY_ESCAPE, GLFW_KEY_F3,    GLFW_KEY_W,          GLFW_KEY_A,
-    GLFW_KEY_S,      GLFW_KEY_D,     GLFW_KEY_SPACE,      GLFW_KEY_LEFT_SHIFT,
-    GLFW_KEY_LEFT_CONTROL,
+    GLFW_KEY_ESCAPE, GLFW_KEY_F3, GLFW_KEY_W,     GLFW_KEY_A,          GLFW_KEY_S,
+    GLFW_KEY_D,      GLFW_KEY_SPACE, GLFW_KEY_LEFT_SHIFT, GLFW_KEY_LEFT_CONTROL,
+    GLFW_KEY_1,      GLFW_KEY_2,  GLFW_KEY_3,     GLFW_KEY_4,          GLFW_KEY_5,
+    GLFW_KEY_6,      GLFW_KEY_7,  GLFW_KEY_8,     GLFW_KEY_9,
 };
 
 constexpr std::array<int, kMouseButtonCount> kGlfwButtons{GLFW_MOUSE_BUTTON_LEFT, GLFW_MOUSE_BUTTON_RIGHT};
@@ -162,6 +163,12 @@ void Window::setVsync(bool enabled)
 bool Window::isKeyDown(Key key) const
 {
     return m_handle != nullptr && glfwGetKey(m_handle, kGlfwKeys[keyIndex(key)]) == GLFW_PRESS;
+}
+
+bool Window::isMouseButtonDown(MouseButton button) const
+{
+    return m_handle != nullptr &&
+           glfwGetMouseButton(m_handle, kGlfwButtons[static_cast<std::size_t>(button)]) == GLFW_PRESS;
 }
 
 void Window::onFramebufferResize(GLFWwindow* handle, int width, int height)

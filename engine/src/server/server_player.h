@@ -73,6 +73,8 @@ public:
     void tick(const entity::CollisionWorld& world);
 
     std::uint32_t lastInput() const;
+    // The highest Neutralize range received: inputs up to it are (or will arrive) neutral. Never goes down.
+    std::uint32_t neutralizedThrough() const { return m_neutralizedThrough; }
     // What the last tick used: the input's sequence (none for a neutral tick while starving or filling) and the
     // intent as applied (after sanitising and neutralising).
     std::optional<std::uint32_t> lastTickInput() const { return m_lastTickInput; }

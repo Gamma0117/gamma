@@ -2,6 +2,7 @@
 
 #include "core/constants.h"
 #include "core/profiler.h"
+#include "render/face_frames.h"
 #include "render/mesh_vertex.h"
 
 #include <array>
@@ -113,20 +114,45 @@ constexpr std::array<FaceInfo, 6> kFaces{{
     {{1, 0, 0}, 0, 2, -1, 1, 1},  // East: right -z, up +y.
 }};
 
+// The same frames as kFaceFrames, which the texture rotations of MeshResources are computed from.
+constexpr bool matchesFaceFrames()
+{
+    for (std::size_t face = 0; face < kFaces.size(); ++face) {
+        const FaceInfo& info = kFaces[face];
+        const FaceFrame& frame = kFaceFrames[face];
+        for (std::int32_t axis = 0; axis < 3; ++axis) {
+            const auto a = static_cast<std::size_t>(axis);
+            if (frame.normal[a] != info.normal[a] || frame.right[a] != (axis == info.rightAxis ? info.rightSign : 0) ||
+                frame.up[a] != (axis == info.upAxis ? info.upSign : 0)) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+static_assert(matchesFaceFrames());
+
 // Corner order: bottom-left, bottom-right, top-right, top-left; signs along (right, up).
 constexpr std::array<std::array<std::int32_t, 2>, 4> kCornerSigns{{{-1, -1}, {1, -1}, {1, 1}, {-1, 1}}};
 
-// A face's merge key: bit 31 set for "a face", layer, cutout bit, then 2-bit AO per corner. 0 = no face.
+// A face's merge key: bit 31 set for "a face", layer, cutout bit, 2-bit AO per corner, then the texture's quarter
+// turns (0 for every face that is not turned, so their keys are as before). 0 = no face.
 constexpr std::uint32_t kFaceBit = 1u << 31;
 
-std::uint32_t makeKey(std::uint16_t layer, bool cutout, const std::array<std::uint32_t, 4>& ao)
+std::uint32_t makeKey(std::uint16_t layer, bool cutout, const std::array<std::uint32_t, 4>& ao, std::uint8_t rotation)
 {
-    return kFaceBit | layer | (cutout ? 1u << 16 : 0u) | ao[0] << 17 | ao[1] << 19 | ao[2] << 21 | ao[3] << 23;
+    return kFaceBit | layer | (cutout ? 1u << 16 : 0u) | ao[0] << 17 | ao[1] << 19 | ao[2] << 21 | ao[3] << 23 |
+           static_cast<std::uint32_t>(rotation & 3u) << 25;
 }
 
 std::uint32_t keyAo(std::uint32_t key, std::size_t corner)
 {
     return (key >> (17 + 2 * corner)) & 3u;
+}
+
+std::uint32_t keyRotation(std::uint32_t key)
+{
+    return (key >> 25) & 3u;
 }
 
 class Mesher {
@@ -182,7 +208,7 @@ private:
             const bool c = occluderAt(diagonal);
             ao[corner] = (s1 && s2) ? 0u : 3u - static_cast<std::uint32_t>(s1) - s2 - c;
         }
-        return makeKey(look.layers[face], look.material == FaceMaterial::Cutout, ao);
+        return makeKey(look.layers[face], look.material == FaceMaterial::Cutout, ao, look.rotations[face]);
     }
 
     void meshSlice(std::size_t face, std::int32_t slice)
@@ -260,12 +286,21 @@ private:
         };
         const auto w = static_cast<std::uint8_t>(width);
         const auto h = static_cast<std::uint8_t>(height);
-        // u grows to the right; v grows downwards from the top edge of the texture.
+        // Unturned, u grows to the right and v downwards from the top edge of the texture. Turned by quarter turns
+        // (counter-clockwise as seen), the texture's right runs up, left or down the face instead; whole-block
+        // offsets keep u and v within 0..16 without changing what is drawn, since textures repeat every block.
+        const std::array<std::array<std::uint8_t, 8>, 4> kUv{{
+            {0, h, w, h, w, 0, 0, 0}, // (u, v) of bottom-left, bottom-right, top-right, top-left.
+            {0, 0, 0, w, h, w, h, 0},
+            {w, 0, 0, 0, 0, h, w, h},
+            {h, w, h, 0, 0, 0, 0, w},
+        }};
+        const std::array<std::uint8_t, 8>& uv = kUv[keyRotation(key)];
         const std::array<Corner, 4> corners{{
-            {left, bottom, 0, h},
-            {right, bottom, w, h},
-            {right, top, w, 0},
-            {left, top, 0, 0},
+            {left, bottom, uv[0], uv[1]},
+            {right, bottom, uv[2], uv[3]},
+            {right, top, uv[4], uv[5]},
+            {left, top, uv[6], uv[7]},
         }};
 
         std::array<std::array<std::uint32_t, 2>, 4> packed{};

@@ -21,6 +21,13 @@ struct ServerPlayerStats {
     std::uint64_t preSpawnMessages = 0; // Inputs and Neutralize before the spawn (the client sends none then).
 };
 
+// The local player's block actions so far (see BlockInteraction).
+struct BlockInteractionStats {
+    std::uint64_t blocksBroken = 0;
+    std::uint64_t placeAttempts = 0;
+    std::uint64_t blocksPlaced = 0;
+};
+
 // Snapshot of the server loop for debug display. Plain data, copied out under the server's lock.
 struct ServerStats {
     bool running = false;
@@ -43,6 +50,9 @@ struct ServerStats {
     // A world with player settings runs the local player.
     bool hasPlayer = false;
     ServerPlayerStats player;
+    // With interaction settings as well, the player breaks and places blocks.
+    bool hasInteraction = false;
+    BlockInteractionStats interaction;
 
     // Why the server thread stopped on its own (an exception in the loop). Empty otherwise.
     std::string error;

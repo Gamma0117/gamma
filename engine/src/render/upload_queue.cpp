@@ -16,7 +16,7 @@ void UploadQueue::push(std::vector<client::ReadyMesh> meshes)
 
 std::vector<client::ReadyMesh> UploadQueue::take(const client::ClientWorld& world, std::size_t byteBudget)
 {
-    std::erase_if(m_meshes, [&](const client::ReadyMesh& ready) { return !world.isCurrent(ready.key); });
+    m_dropped += std::erase_if(m_meshes, [&](const client::ReadyMesh& ready) { return !world.isCurrent(ready.key); });
     std::vector<client::ReadyMesh> taken;
     std::size_t bytes = 0;
     while (!m_meshes.empty() && (taken.empty() || bytes < byteBudget)) {

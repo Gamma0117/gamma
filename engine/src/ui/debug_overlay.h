@@ -1,12 +1,18 @@
 #pragma once
 
+#include "client/block_particles.h"
 #include "client/local_player.h"
 #include "client/mesh_scheduler.h"
+#include "client/section_latency.h"
+#include "data/player_interaction.h"
+#include "entity/player_messages.h"
 #include "render/chunk_renderer.h"
 #include "server/server_stats.h"
+#include "world/coordinates.h"
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 
 namespace aurora::client {
 class Camera;
@@ -48,12 +54,26 @@ struct DebugOverlayData {
     // The local player as predicted (null without one) and whether the camera flies free of it.
     const client::LocalPlayer* player = nullptr;
     bool freeFlight = false;
+
+    // Block actions: the palette and its selected slot, the block the look selects, the newest server state (mining
+    // and the last place attempt), fragments and how long section updates take to reach the GPU.
+    const data::PlayerInteractionTuning* interaction = nullptr;
+    std::uint8_t slot = 0;
+    std::optional<world::BlockPos> selected{};
+    const entity::PlayerState* playerState = nullptr;
+    std::size_t particles = 0;
+    client::BlockParticleStats particleStats{};
+    client::SectionLatencyStats latency{};
 };
 
 // What the user did on the panel this frame.
 struct DebugOverlayActions {
     bool toggleFreeFlight = false;
 };
+
+// A small cross in the middle of the screen (the selection ray), on ImGui's foreground layer. Call between
+// ImGuiLayer::beginFrame and endFrame.
+void drawCrosshair();
 
 // F3 debug screen: a translucent panel in the top-left corner with frame timing, server ticks, workers,
 // window and driver info. Hidden until toggled.

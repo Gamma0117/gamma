@@ -48,6 +48,13 @@ struct WorldStats {
 //   Loaded update with a snapshot; removing a Loaded entry adds an Unloaded update with the same number.
 //   Pending and Failed entries were never announced, so removing them adds nothing.
 //
+// Block changes: setBlock() marks the section dirty when the block really changes (writing the state already
+// there changes nothing). publishChanges() turns the dirty sections of every loaded chunk into one Changed update
+// with the next revision and a snapshot that copies only those sections and shares the rest with the last one
+// published. So a section changed several times between two calls is copied once, with its final blocks, and a
+// change that is undone before the call (A -> B -> A) is still published once. Unloading drops the dirty marks;
+// updates already made stay in order.
+//
 // The world keeps the registry it was created with; states are checked against it.
 class World {
 public:
@@ -65,9 +72,13 @@ public:
     std::optional<BlockStateId> getBlock(const BlockPos& pos) const;
     // False when y is outside the world height, the chunk is not loaded or `state` is not in the registry.
     bool setBlock(const BlockPos& pos, BlockStateId state);
+    // Adds a Changed update for every loaded chunk with dirty sections, in the order they first changed.
+    void publishChanges();
 
     // Null unless loaded.
     const Chunk* chunk(ChunkPos pos) const;
+    // The load generation of a loaded chunk, nullopt otherwise.
+    std::optional<std::uint64_t> generation(ChunkPos pos) const;
     // The updates since the last call, oldest first.
     std::vector<ChunkUpdate> takeChunkUpdates();
     WorldStats stats() const;
@@ -83,8 +94,11 @@ private:
     struct Entry {
         EntryState state = EntryState::Pending;
         std::future<std::unique_ptr<Chunk>> result; // Pending only.
-        std::unique_ptr<Chunk> chunk;               // Loaded only.
-        std::uint64_t generation = 0;               // Loaded only.
+        // Loaded only:
+        std::unique_ptr<Chunk> chunk;
+        std::uint64_t generation = 0;
+        std::shared_ptr<const ChunkSnapshot> published; // The last snapshot sent out.
+        std::uint32_t dirtySections = 0;                // Bit i: section i changed since `published`.
     };
 
     void checkOwnerThread() const;
@@ -99,6 +113,7 @@ private:
     std::unordered_map<ChunkPos, Entry, ChunkPosHash> m_chunks;
     std::uint64_t m_lastGeneration = 0;
     std::vector<ChunkUpdate> m_updates;
+    std::vector<ChunkPos> m_dirtyChunks; // In the order they first changed since the last publishChanges().
 };
 
 } // namespace aurora::world

@@ -1,0 +1,14 @@
+{
+  "reach": 5.0,
+  "mining_seconds_per_hardness": 0.5,
+  "palette": [
+    "aurora:stone", "aurora:dirt", "aurora:grass_block",
+    "aurora:cobblestone", "aurora:oak_log", "aurora:oak_planks"
+  ],
+  "particle_count": 12,
+  "particle_lifetime": 0.6,
+  "particle_gravity": 32.0,
+  "particle_speed": 2.0,
+  "particle_size": 0.06,
+  "max_particles": 512
+}

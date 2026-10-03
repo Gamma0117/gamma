@@ -81,7 +81,7 @@ void World::ensureLoaded(ChunkPos center, std::int32_t radius)
             return false;
         }
         if (entry.state == EntryState::Loaded) {
-            m_updates.push_back({ChunkUpdate::Kind::Unloaded, pos, entry.generation, nullptr});
+            m_updates.push_back({.kind = ChunkUpdate::Kind::Unloaded, .pos = pos, .generation = entry.generation});
         }
         return true;
     });
@@ -126,18 +126,58 @@ bool World::setBlock(const BlockPos& pos, BlockStateId state)
     if (!isInWorldHeight(pos.y) || state >= m_registry->stateCount()) {
         return false;
     }
-    Chunk* loaded = loadedChunk(chunkPosOf(pos));
-    if (!loaded) {
+    const ChunkPos chunkPos = chunkPosOf(pos);
+    const auto found = m_chunks.find(chunkPos);
+    if (found == m_chunks.end() || found->second.state != EntryState::Loaded) {
         return false;
     }
-    loaded->setBlock(localCoord(pos.x), pos.y, localCoord(pos.z), state);
+    Entry& entry = found->second;
+    const BlockStateId previous = entry.chunk->setBlock(localCoord(pos.x), pos.y, localCoord(pos.z), state);
+    if (previous != state) {
+        if (entry.dirtySections == 0) {
+            m_dirtyChunks.push_back(chunkPos);
+        }
+        entry.dirtySections |= 1u << sectionIndex(pos.y);
+    }
     return true;
+}
+
+void World::publishChanges()
+{
+    checkOwnerThread();
+    AURORA_PROFILE_ZONE_N("World publishChanges");
+    for (const ChunkPos pos : m_dirtyChunks) {
+        const auto found = m_chunks.find(pos);
+        if (found == m_chunks.end() || found->second.state != EntryState::Loaded || found->second.dirtySections == 0) {
+            continue; // Unloaded since (its marks went with it), or a new load that has not changed.
+        }
+        Entry& entry = found->second;
+        entry.published = ChunkSnapshot::changedFrom(*entry.published, *entry.chunk, entry.dirtySections,
+                                                     entry.published->revision() + 1);
+        m_updates.push_back({.kind = ChunkUpdate::Kind::Changed,
+                             .pos = pos,
+                             .generation = entry.generation,
+                             .snapshot = entry.published,
+                             .changedSections = entry.dirtySections});
+        entry.dirtySections = 0;
+    }
+    m_dirtyChunks.clear();
 }
 
 const Chunk* World::chunk(ChunkPos pos) const
 {
     checkOwnerThread();
     return loadedChunk(pos);
+}
+
+std::optional<std::uint64_t> World::generation(ChunkPos pos) const
+{
+    checkOwnerThread();
+    const auto found = m_chunks.find(pos);
+    if (found == m_chunks.end() || found->second.state != EntryState::Loaded) {
+        return std::nullopt;
+    }
+    return found->second.generation;
 }
 
 std::vector<ChunkUpdate> World::takeChunkUpdates()
@@ -217,8 +257,12 @@ void World::receive(ChunkPos pos, Entry& entry)
     entry.chunk = std::move(chunk);
     entry.state = EntryState::Loaded;
     entry.generation = ++m_lastGeneration;
-    m_updates.push_back(
-        {ChunkUpdate::Kind::Loaded, pos, entry.generation, ChunkSnapshot::copyOf(*entry.chunk, entry.generation)});
+    entry.published = ChunkSnapshot::copyOf(*entry.chunk, entry.generation);
+    entry.dirtySections = 0;
+    m_updates.push_back({.kind = ChunkUpdate::Kind::Loaded,
+                         .pos = pos,
+                         .generation = entry.generation,
+                         .snapshot = entry.published});
 }
 
 } // namespace aurora::world

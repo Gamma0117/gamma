@@ -1,0 +1,1 @@
+whole run: 4 samples: p50 20.0 ms, p95 40.0 ms, max 40.0 ms

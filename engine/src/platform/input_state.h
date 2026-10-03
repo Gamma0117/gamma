@@ -16,8 +16,17 @@ enum class Key {
     Space,
     LeftShift,
     LeftControl,
+    Digit1, // The number row, 1 to 9 in order.
+    Digit2,
+    Digit3,
+    Digit4,
+    Digit5,
+    Digit6,
+    Digit7,
+    Digit8,
+    Digit9,
 };
-inline constexpr std::size_t kKeyCount = static_cast<std::size_t>(Key::LeftControl) + 1; // Keep in sync.
+inline constexpr std::size_t kKeyCount = static_cast<std::size_t>(Key::Digit9) + 1; // Keep in sync.
 
 enum class MouseButton {
     Left,

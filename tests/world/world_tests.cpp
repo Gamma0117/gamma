@@ -384,7 +384,7 @@ TEST_CASE("A snapshot copies the chunk and does not follow later changes", "[wor
     REQUIRE(world.setBlock(BlockPos{-30, 63, 50}, aurora::data::kAirState));
     CHECK(snapshot.getBlock(2, 100, 2) == aurora::data::kAirState);
     CHECK(snapshot.getBlock(2, 63, 2) == stateOf(*fixture.registry, "aurora:grass_block"));
-    CHECK(world.takeChunkUpdates().empty()); // Block changes are not announced before P0-7.
+    CHECK(world.takeChunkUpdates().empty()); // Block changes wait for publishChanges().
 }
 
 TEST_CASE("Load updates carry generations and unloads repeat them", "[world][snapshot]")

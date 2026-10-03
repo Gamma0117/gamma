@@ -55,6 +55,7 @@ void ChunkRenderer::shutdown()
     }
     m_meshes.clear();
     m_uploads.clear();
+    m_taken.clear();
     if (m_vertexArray != 0) {
         glDeleteVertexArrays(1, &m_vertexArray);
         m_vertexArray = 0;
@@ -85,12 +86,14 @@ void ChunkRenderer::update(const client::ClientWorld& world, std::size_t byteBud
         switch (chooseMeshUpdate(ready, onGpu)) {
         case MeshUpdate::Upload:
             upload(ready);
+            m_taken.push_back(ready.key);
             break;
         case MeshUpdate::Remove:
             if (existing != m_meshes.end()) {
                 release(existing->second);
                 m_meshes.erase(existing);
             }
+            m_taken.push_back(ready.key);
             break;
         case MeshUpdate::Ignore:
             break;
@@ -139,6 +142,12 @@ void ChunkRenderer::draw(const client::Camera& camera, float aspect, float farPl
     glBindVertexArray(0);
 }
 
+std::optional<client::MeshKey> ChunkRenderer::meshKeyOf(const client::SectionKey& section) const
+{
+    const auto found = m_meshes.find(section);
+    return found == m_meshes.end() ? std::nullopt : std::optional(found->second.key);
+}
+
 ChunkRenderStats ChunkRenderer::stats() const
 {
     ChunkRenderStats stats;
@@ -150,6 +159,8 @@ ChunkRenderStats ChunkRenderer::stats() const
     }
     stats.drawnSections = m_drawnSections;
     stats.drawCalls = m_drawCalls;
+    stats.staleUploads = m_uploads.dropped();
+    stats.uploadedBytes = m_uploadedBytes;
     return stats;
 }
 
@@ -163,6 +174,7 @@ void ChunkRenderer::upload(const client::ReadyMesh& ready)
     mesh.indexOffset = vertexBytes;
     mesh.vertices = ready.mesh.vertexCount();
     mesh.bytes = vertexBytes + indexBytes;
+    m_uploadedBytes += mesh.bytes;
     glCreateBuffers(1, &mesh.buffer);
     glNamedBufferStorage(mesh.buffer, static_cast<GLsizeiptr>(mesh.bytes), nullptr, GL_DYNAMIC_STORAGE_BIT);
     glNamedBufferSubData(mesh.buffer, 0, static_cast<GLsizeiptr>(vertexBytes), ready.mesh.vertexWords.data());

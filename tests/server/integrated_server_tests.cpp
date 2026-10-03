@@ -268,7 +268,7 @@ TEST_CASE("Chunk updates follow the view center in order", "[server]")
     const auto collectUntil = [&](const std::function<bool()>& done) {
         const Clock::time_point deadline = Clock::now() + 10s;
         while (!done() && Clock::now() < deadline) {
-            std::vector<ChunkUpdate> more = server.takeChunkUpdates();
+            std::vector<ChunkUpdate> more = server.takeFrame().chunkUpdates;
             updates.insert(updates.end(), std::make_move_iterator(more.begin()), std::make_move_iterator(more.end()));
             std::this_thread::sleep_for(1ms);
         }
@@ -348,12 +348,12 @@ std::shared_ptr<const aurora::data::PlayerMovementTuning> testMovement()
     return std::make_shared<const aurora::data::PlayerMovementTuning>(aurora::test::standardTuning());
 }
 
-// Polls takePlayerState() until a state arrives (10 s hang guard).
+// Polls takeFrame() until a player state arrives (10 s hang guard). The chunk updates are dropped.
 std::optional<aurora::entity::PlayerState> waitForPlayerState(IntegratedServer& server)
 {
     const Clock::time_point deadline = Clock::now() + 10s;
     while (Clock::now() < deadline) {
-        if (std::optional<aurora::entity::PlayerState> state = server.takePlayerState()) {
+        if (std::optional<aurora::entity::PlayerState> state = server.takeFrame().playerState) {
             return state;
         }
         std::this_thread::sleep_for(1ms);
@@ -416,7 +416,7 @@ TEST_CASE("The load center follows the player", "[server][player]")
     const Clock::time_point deadline = Clock::now() + 10s;
     for (std::uint32_t sequence = 1; !loadedEast && Clock::now() < deadline; ++sequence) {
         server.sendPlayerInput({sequence, {.forward = 1, .yaw = 90.0f}});
-        for (const ChunkUpdate& update : server.takeChunkUpdates()) {
+        for (const ChunkUpdate& update : server.takeFrame().chunkUpdates) {
             loadedEast = loadedEast || (update.kind == ChunkUpdate::Kind::Loaded && update.pos == ChunkPos{2, 0});
         }
         std::this_thread::sleep_for(50ms);

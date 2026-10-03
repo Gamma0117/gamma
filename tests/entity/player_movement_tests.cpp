@@ -448,3 +448,44 @@ TEST_CASE("The motion carries the pose of the intent the step used", "[entity][m
     CHECK(motion.position == before);
     CHECK(motion.sneaking);
 }
+
+TEST_CASE("Block actions ride on the intent and go wherever the movement goes", "[entity][movement][action]")
+{
+    using aurora::entity::MovementIntent;
+    const MovementIntent acting{.forward = 1, .yaw = 30.0f, .pitch = -10.0f, .attack = true, .use = true, .slot = 5};
+    const MovementIntent neutral = acting.neutral();
+    CHECK_FALSE(neutral.attack);
+    CHECK_FALSE(neutral.use);
+    CHECK(neutral.slot == 0);
+    CHECK(neutral.yaw == 30.0f);
+    CHECK(neutral.pitch == -10.0f);
+
+    // A finite look keeps the actions (the server checks the slot itself); a look that is not a number drops them
+    // with the movement.
+    const MovementIntent kept = aurora::entity::sanitizeIntent(acting, 0.0f, 0.0f);
+    CHECK(kept.attack);
+    CHECK(kept.use);
+    CHECK(kept.slot == 5);
+    MovementIntent broken = acting;
+    broken.yaw = std::numeric_limits<float>::quiet_NaN();
+    const MovementIntent dropped = aurora::entity::sanitizeIntent(broken, 12.0f, 3.0f);
+    CHECK_FALSE(dropped.attack);
+    CHECK_FALSE(dropped.use);
+    CHECK(dropped.forward == 0);
+    CHECK(dropped.yaw == 12.0f);
+
+    // stepPlayer ignores them: the same motion with or without.
+    const aurora::test::TestBlocks blocks;
+    const aurora::data::PlayerMovementTuning tuning = aurora::test::standardTuning();
+    aurora::entity::PlayerMotion withActions = aurora::test::standingAt(0.5, 64.0, 0.5);
+    aurora::entity::PlayerMotion without = withActions;
+    MovementIntent plain = acting;
+    plain.attack = false;
+    plain.use = false;
+    plain.slot = 0;
+    for (int tick = 0; tick < 10; ++tick) {
+        aurora::entity::stepPlayer(withActions, acting, tuning, blocks.world());
+        aurora::entity::stepPlayer(without, plain, tuning, blocks.world());
+    }
+    CHECK(aurora::test::sameBits(withActions, without));
+}

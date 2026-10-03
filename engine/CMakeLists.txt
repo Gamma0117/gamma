@@ -57,6 +57,7 @@ add_library(aurora_data STATIC
     src/data/load_issue.cpp
     src/data/pack_files.cpp
     src/data/path_probe.cpp
+    src/data/player_interaction.cpp
     src/data/player_movement.cpp
     src/data/resource_id.cpp
 )
@@ -85,8 +86,10 @@ aurora_set_warnings(aurora_world)
 # the server (authoritative) and the client (prediction). Plain data and functions; no threads, no rendering.
 add_library(aurora_entity STATIC
     src/entity/aabb.cpp
+    src/entity/block_raycast.cpp
     src/entity/collision.cpp
     src/entity/collision_shapes.cpp
+    src/entity/player_messages.cpp
     src/entity/player_movement.cpp
 )
 add_library(aurora::entity ALIAS aurora_entity)
@@ -97,6 +100,7 @@ aurora_set_warnings(aurora_entity)
 # the mouse, and the local player's input and prediction. CPU only: no window or GL here, so all of it is tested
 # without a context.
 add_library(aurora_client STATIC
+    src/client/block_particles.cpp
     src/client/camera.cpp
     src/client/client_collision_view.cpp
     src/client/client_world.cpp
@@ -106,6 +110,7 @@ add_library(aurora_client STATIC
     src/client/mesh_scheduler.cpp
     src/client/movement_sampler.cpp
     src/client/player_control.cpp
+    src/client/section_latency.cpp
 )
 add_library(aurora::client ALIAS aurora_client)
 target_link_libraries(aurora_client PUBLIC aurora::entity)
@@ -113,6 +118,7 @@ aurora_set_warnings(aurora_client)
 
 # server: authoritative simulation on its own fixed-rate thread. Knows nothing about render or ui.
 add_library(aurora_server STATIC
+    src/server/block_interaction.cpp
     src/server/integrated_server.cpp
     src/server/server_player.cpp
     src/server/world_collision_view.cpp
@@ -135,7 +141,9 @@ aurora_set_warnings(aurora_render_mesh)
 
 # render: OpenGL state and draw commands.
 add_library(aurora_render STATIC
+    src/render/block_effects_renderer.cpp
     src/render/chunk_renderer.cpp
+    src/render/gl_state.cpp
     src/render/renderer.cpp
     src/render/screenshot.cpp
     src/render/shader.cpp

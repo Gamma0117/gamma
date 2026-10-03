@@ -9,6 +9,7 @@
 
 #include <glm/vec3.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -34,7 +35,10 @@ struct PlayerFrameInput {
     bool minimised = false;
     bool focused = false;
     bool escapePressed = false;
-    bool clickPressed = false; // Left mouse button.
+    bool clickPressed = false; // Left mouse button pressed: captures the mouse, or arms the attack while accepting.
+    bool attackDown = false;   // Left mouse button held now.
+    bool usePressed = false;   // Right mouse button pressed.
+    std::optional<std::uint8_t> slotPressed{}; // A number key 1..9 pressed: slot 0..8 (the lowest if several).
     bool uiWantsMouse = false;
     bool uiWantsKeyboard = false;
     bool jumpPressed = false; // Space pressed during the poll: a tap can be shorter than a tick.
@@ -53,7 +57,8 @@ struct PlayerFrameInput {
 //     - a release since the last frame blocks, even if a click of the same poll captured again;
 //     - accepting = enabled, focused, captured, the UI not taking the keyboard and not flying freely; if it was on
 //       and is off now, block;
-//     - the sampler closes the frame (a jump press is kept for the next tick only if nothing disturbed the frame).
+//     - the sampler closes the frame: jump, attack, use and slot presses count only if nothing disturbed the
+//       frame, and the left button's held state disarms the attack (see MovementSampler).
 //  2. update(state, now, keys, yaw, pitch): the newest server state (the first one is the spawn and starts the
 //     client tick clock at `now`), then every client tick due at `now`: sample, predict, send.
 //  3. setFreeFlight(on), from the F3 panel after the world: switching on blocks in that same frame.
@@ -61,8 +66,9 @@ struct PlayerFrameInput {
 // something new was sent since the last one). Every way input stops blocks as it happens.
 class PlayerControl {
 public:
+    // `paletteSize`: the number keys select slots 0..paletteSize - 1 (none when 0).
     PlayerControl(std::shared_ptr<const data::PlayerMovementTuning> tuning, const entity::CollisionWorld& world,
-                  PlayerMessageSink& sink);
+                  PlayerMessageSink& sink, std::size_t paletteSize = 0);
 
     // Returns false for a minimised window: the frame has no player work left.
     bool input(const PlayerFrameInput& frame);
@@ -73,6 +79,10 @@ public:
     bool freeFlight() const { return m_freeFlight; }
     // Whether movement input counted at the end of the last input().
     bool accepting() const { return m_sampler.accepting(); }
+    // The left button is held for the game (armed and accepting): cracks may be shown.
+    bool attackActive() const { return m_sampler.attackActive(); }
+    // The palette slot the next use places from.
+    std::uint8_t slot() const { return m_sampler.slot(); }
     // How far `now` is between the last client tick and the next (0..1), for drawing.
     double tickProgress(core::TickScheduler::TimePoint now) const { return m_clock.progress(now); }
     // Where the eyes are drawn at `now`: the feet and the eye height between the last two client ticks. Only

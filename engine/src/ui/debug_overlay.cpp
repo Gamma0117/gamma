@@ -82,11 +82,13 @@ void drawWorldSection(const DebugOverlayData& data)
     ImGui::Text("Render distance %d: %zu chunks held, %zu drawable", data.renderDistance, data.chunksHeld,
                 data.chunksDrawable);
     const client::MeshSchedulerStats& meshes = data.meshes;
-    ImGui::Text("Meshes %zu done, %zu empty, %zu waiting, %zu in flight, %zu failed", meshes.meshed, meshes.empty,
-                meshes.waiting, meshes.inFlight, meshes.failed);
+    ImGui::Text("Meshes %zu done, %zu empty, %zu waiting, %zu in flight, %zu failed, %llu stale", meshes.meshed,
+                meshes.empty, meshes.waiting, meshes.inFlight, meshes.failed,
+                static_cast<unsigned long long>(meshes.stale));
     const render::ChunkRenderStats& gpu = data.gpu;
-    ImGui::Text("GPU %zu sections, %zu vertices, %.2f MB, %zu to upload", gpu.sections, gpu.vertices,
-                static_cast<double>(gpu.gpuBytes) / (1024.0 * 1024.0), gpu.pendingUploads);
+    ImGui::Text("GPU %zu sections, %zu vertices, %.2f MB, %zu to upload, %llu stale dropped", gpu.sections,
+                gpu.vertices, static_cast<double>(gpu.gpuBytes) / (1024.0 * 1024.0), gpu.pendingUploads,
+                static_cast<unsigned long long>(gpu.staleUploads));
     ImGui::Text("  drawn %zu sections in %zu calls", gpu.drawnSections, gpu.drawCalls);
     ImGui::TextDisabled("%s", data.cursorCaptured ? "Mouse captured (Esc releases)"
                                                   : "Click the world to capture the mouse");
@@ -122,6 +124,54 @@ void drawPlayerSection(const DebugOverlayData& data, DebugOverlayActions& action
                 static_cast<unsigned long long>(server.preSpawnMessages));
 }
 
+void drawActionSection(const DebugOverlayData& data)
+{
+    if (data.interaction == nullptr) {
+        return;
+    }
+    std::string palette;
+    for (std::size_t slot = 0; slot < data.interaction->palette.size(); ++slot) {
+        palette += std::format("{}{}{} {}", slot == 0 ? "" : "  ", slot == data.slot ? ">" : "", slot + 1,
+                               data.interaction->palette[slot].path());
+    }
+    ImGui::Text("Palette (1-9): %s", palette.c_str());
+    if (data.selected) {
+        ImGui::Text("Looking at %d / %d / %d", data.selected->x, data.selected->y, data.selected->z);
+    } else {
+        ImGui::TextUnformatted("Looking at nothing in reach");
+    }
+    if (data.playerState != nullptr) {
+        const entity::PlayerState& state = *data.playerState;
+        if (state.digTarget) {
+            ImGui::Text("Mining %d / %d / %d: %u of %u ticks", state.digTarget->x, state.digTarget->y,
+                        state.digTarget->z, state.digProgress, state.digRequired);
+        } else {
+            ImGui::TextUnformatted("Mining nothing");
+        }
+        ImGui::Text("Last place (input %u): %.*s", state.lastPlaceInput,
+                    static_cast<int>(entity::placeResultName(state.lastPlaceResult).size()),
+                    entity::placeResultName(state.lastPlaceResult).data());
+    }
+    const server::BlockInteractionStats& server = data.server.interaction;
+    ImGui::Text("  server: broken %llu, placed %llu of %llu attempts",
+                static_cast<unsigned long long>(server.blocksBroken),
+                static_cast<unsigned long long>(server.blocksPlaced),
+                static_cast<unsigned long long>(server.placeAttempts));
+    ImGui::Text("Fragments %zu (too old %llu, other load %llu, dropped %llu)", data.particles,
+                static_cast<unsigned long long>(data.particleStats.tooOld),
+                static_cast<unsigned long long>(data.particleStats.otherLoad),
+                static_cast<unsigned long long>(data.particleStats.evicted));
+    const client::SectionLatencyStats& latency = data.latency;
+    // Windows of the newest completions only; percentiles of a whole run come from --latency-log.
+    ImGui::Text("Section update latency (ms): last %zu mean %.1f max %.1f; last %zu p50 %.1f p95 %.1f max %.1f",
+                latency.recentCount, latency.recentMeanMs, latency.recentMaxMs, latency.windowCount,
+                latency.windowP50Ms, latency.windowP95Ms, latency.windowMaxMs);
+    ImGui::Text("  run: done %llu, max %.1f; pending %zu, canceled %llu, failed %llu, pending dropped %llu",
+                static_cast<unsigned long long>(latency.completed), latency.runMaxMs, latency.pending,
+                static_cast<unsigned long long>(latency.canceled), static_cast<unsigned long long>(latency.failed),
+                static_cast<unsigned long long>(latency.overflowed));
+}
+
 void drawSystemSection(platform::Window& window, const render::Renderer& renderer)
 {
     ImGui::Text("Window %d x %d", window.framebufferWidth(), window.framebufferHeight());
@@ -140,6 +190,19 @@ void drawSystemSection(platform::Window& window, const render::Renderer& rendere
 }
 
 } // namespace
+
+void drawCrosshair()
+{
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    const ImVec2 centre(viewport->Pos.x + viewport->Size.x * 0.5f, viewport->Pos.y + viewport->Size.y * 0.5f);
+    constexpr float kArm = 8.0f;
+    ImDrawList* list = ImGui::GetForegroundDrawList();
+    for (const ImU32 colour : {IM_COL32(0, 0, 0, 160), IM_COL32(255, 255, 255, 230)}) {
+        const float width = colour == IM_COL32(0, 0, 0, 160) ? 4.0f : 2.0f;
+        list->AddLine(ImVec2(centre.x - kArm, centre.y), ImVec2(centre.x + kArm, centre.y), colour, width);
+        list->AddLine(ImVec2(centre.x, centre.y - kArm), ImVec2(centre.x, centre.y + kArm), colour, width);
+    }
+}
 
 DebugOverlayActions DebugOverlay::draw(platform::Window& window, const render::Renderer& renderer,
                                        const DebugOverlayData& data) const
@@ -170,6 +233,7 @@ DebugOverlayActions DebugOverlay::draw(platform::Window& window, const render::R
         drawWorldSection(data);
         ImGui::Separator();
         drawPlayerSection(data, actions);
+        drawActionSection(data);
         ImGui::Separator();
         drawSystemSection(window, renderer);
         ImGui::TextDisabled("F3: hide");
